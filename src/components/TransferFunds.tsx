@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Button from "./base/Button";
-import { walletService } from "@/services/wallet";
+import { agentKit } from "@/services/agentkit";
+import { usePrivy } from "@privy-io/react-auth";
+import { ethers } from "ethers";
 
 interface TransferFundsProps {
   userWalletAddress: string;
@@ -13,16 +15,36 @@ const TransferFunds = ({ userWalletAddress, agentWalletAddress }: TransferFundsP
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const { authenticated, user } = usePrivy();
 
   const handleTransfer = async () => {
     setIsLoading(true);
     setError(null);
     setSuccess(false);
-
+  
     try {
-      await walletService.transferToUserWallet(userWalletAddress);
+      if (!authenticated || !user?.id) {
+        throw new Error("Please connect your wallet first");
+      }
+  
+      // Connect the agent wallet
+      await agentKit.connectWallet(user.id);
+      
+      // Get the agent's wallet balance
+      const balance = await agentKit.getBalance();
+      if (!balance || balance === "0") {
+        throw new Error("No funds available to transfer");
+      }
+  
+      // Convert balance to BigInt for calculations
+      const balanceWei = ethers.parseEther(balance);
+      
+      // Transfer the funds
+      const txHash = await agentKit.transferFunds(userWalletAddress, balanceWei);
+      console.log("Transfer successful:", txHash);
       setSuccess(true);
     } catch (err) {
+      console.error("Transfer error:", err);
       setError(err instanceof Error ? err.message : "Failed to transfer funds");
     } finally {
       setIsLoading(false);

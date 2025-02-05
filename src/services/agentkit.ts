@@ -28,10 +28,12 @@ export class AgentKitService {
     try {
       // First check if a wallet already exists for this user
       const existingWallet = storageService.getWalletByUserId(userId);
-      
+
       if (existingWallet) {
         // Restore existing wallet
-        const privateKey = await this.decryptPrivateKey(existingWallet.encryptedPrivateKey);
+        const privateKey = await this.decryptPrivateKey(
+          existingWallet.encryptedPrivateKey
+        );
         this.wallet = new ethers.Wallet(privateKey, this.provider!);
         console.log("🔐 Existing wallet restored:", this.wallet.address);
         return true;
@@ -42,7 +44,10 @@ export class AgentKitService {
       this.wallet = newWallet;
 
       // Encrypt and store the new wallet
-      const encryptedKey = await this.encryptPrivateKey(newWallet.privateKey, userId);
+      const encryptedKey = await this.encryptPrivateKey(
+        newWallet.privateKey,
+        userId
+      );
       storageService.storeWallet({
         address: newWallet.address,
         encryptedPrivateKey: encryptedKey,
@@ -59,7 +64,10 @@ export class AgentKitService {
     }
   }
 
-  private async encryptPrivateKey(privateKey: string, userId: string): Promise<string> {
+  private async encryptPrivateKey(
+    privateKey: string,
+    userId: string
+  ): Promise<string> {
     // In production, use a proper encryption service
     // This is a simple example and NOT secure for production
     return btoa(`${privateKey}:${userId}`);
@@ -90,12 +98,12 @@ export class AgentKitService {
   }
 
   async getBalance(): Promise<string> {
-    if (!this.wallet) {
-      throw new Error("Wallet not connected");
+    if (!this.wallet || !this.provider) {
+      throw new Error("Wallet or provider not connected");
     }
 
     try {
-      const balance = await this.wallet.getBalance();
+      const balance = await this.provider.getBalance(this.wallet.address);
       return ethers.formatEther(balance);
     } catch (error) {
       console.error("Failed to get balance:", error);
@@ -154,7 +162,10 @@ export class AgentKitService {
           return "0";
         }
       } catch (error) {
-        console.debug(`Failed to get balance for token ${tokenAddress}:`, error);
+        console.debug(
+          `Failed to get balance for token ${tokenAddress}:`,
+          error
+        );
         return "0";
       }
 
@@ -162,17 +173,23 @@ export class AgentKitService {
       try {
         decimals = await tokenContract.decimals();
       } catch (error) {
-        console.debug(`Failed to get decimals for token ${tokenAddress}:`, error);
+        console.debug(
+          `Failed to get decimals for token ${tokenAddress}:`,
+          error
+        );
         return "0";
       }
 
       // Format the balance, defaulting to 18 decimals if decimals call failed
       const formattedBalance = ethers.formatUnits(balance, decimals || 18);
-      
+
       // Return "0" if the formatted balance is not a valid number
       return isNaN(Number(formattedBalance)) ? "0" : formattedBalance;
     } catch (error) {
-      console.debug(`Token contract interaction failed for ${tokenAddress}:`, error);
+      console.debug(
+        `Token contract interaction failed for ${tokenAddress}:`,
+        error
+      );
       return "0";
     }
   }
@@ -213,6 +230,69 @@ export class AgentKitService {
     } catch (error) {
       console.error("Failed to fund agent wallet:", error);
       return false;
+    }
+  }
+
+  getProvider(): ethers.Provider | null {
+    return this.provider;
+  }
+
+  async transferFunds(
+    destinationAddress: string,
+    amount: bigint
+  ): Promise<string> {
+    if (!this.wallet || !this.provider) {
+      throw new Error("Agent wallet or provider not connected");
+    }
+
+    try {
+      // Get current balance using provider
+      const balance =
+        ((await this.provider.getBalance(this.wallet.address)) * 99n) / 100n;
+      // Get current network conditions
+      const feeData = await this.provider.getFeeData();
+
+      // Estimate gas for the transfer
+      const gasEstimate = await this.provider.estimateGas({
+        from: this.wallet.address,
+        to: destinationAddress,
+        value: balance, // Try to send max balance to estimate worst-case gas
+      });
+
+      // Calculate gas cost with a 20% buffer for safety
+      const gasBuffer = (gasEstimate * 200n) / 100n;
+      const gasCost = gasBuffer * (feeData.gasPrice ?? 0n);
+
+      // Calculate amount to send (total balance minus gas cost)
+      const amountToSend = balance - gasCost;
+
+      if (amountToSend <= 0n) {
+        throw new Error("Insufficient funds to cover gas costs");
+      }
+
+      // Send the transaction
+      const tx = await this.wallet.sendTransaction({
+        to: destinationAddress,
+        value: amountToSend,
+        gasLimit: gasBuffer, // Use buffered gas limit
+        maxFeePerGas: feeData.maxFeePerGas,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+      });
+
+      await tx.wait();
+
+      console.log("Transfer successful:", {
+        from: this.wallet.address,
+        to: destinationAddress,
+        amount: ethers.formatEther(amountToSend),
+        gasLimit: gasBuffer.toString(),
+        txHash: tx.hash,
+      });
+
+      return tx.hash;
+    } catch (error) {
+      console.error("Transfer failed:", error);
+      throw error;
     }
   }
 }
