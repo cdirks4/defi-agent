@@ -1,0 +1,49 @@
+{
+  "name": "platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@coinbase/agentkit": "^0.1.1",
+    "@fontsource-variable/outfit": "^5.1.1",
+    "@fontsource/space-grotesk": "^5.0.15",
+    "@privy-io/react-auth": "^2.2.1",
+    "@urql/core": "^4.2.3",
+    "@vapi-ai/web": "^1.1.0",
+    "date-fns": "^4.1.0",
+    "ethers": "^6.13.5",
+    "lucide-react": "^0.474.0",
+    "next": "15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "urql": "^4.2.1",
+    "use-sync-external-store": "^1.2.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "assert": "^2.1.0",
+    "browserify-zlib": "^0.2.0",
+    "crypto-browserify": "^3.12.0",
+    "eslint": "^9",
+    "eslint-config-next": "15.1.6",
+    "https-browserify": "^1.0.0",
+    "os-browserify": "^0.3.0",
+    "path-browserify": "^1.0.1",
+    "postcss": "^8",
+    "process": "^0.11.10",
+    "stream-browserify": "^3.0.0",
+    "stream-http": "^3.2.0",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5",
+    "url": "^0.11.3"
+  }
+}
