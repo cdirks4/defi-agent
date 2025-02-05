@@ -13,6 +13,7 @@
     "@fontsource-variable/outfit": "^5.1.1",
     "@fontsource/space-grotesk": "^5.0.15",
     "@privy-io/react-auth": "^2.2.1",
+    "@privy-io/server-auth": "^1.18.4",
     "@urql/core": "^4.2.3",
     "@vapi-ai/web": "^1.1.0",
     "date-fns": "^4.1.0",
