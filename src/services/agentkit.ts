@@ -80,12 +80,12 @@ export class AgentKitService {
   }
 
   async checkWalletHealth(): Promise<WalletHealth> {
-    if (!this.wallet) {
-      throw new Error("Wallet not connected");
+    if (!this.wallet || !this.provider) {
+      throw new Error("Wallet or provider not connected");
     }
 
     try {
-      const balance = await this.wallet.getBalance();
+      const balance = await this.provider.getBalance(this.wallet.address);
       return {
         isConnected: true,
         balance: ethers.formatEther(balance),
@@ -117,16 +117,47 @@ export class AgentKitService {
     amount: number;
     price: number;
   }) {
-    if (!this.wallet) {
+    if (!this.wallet || !this.provider) {
       throw new Error("Wallet not connected");
     }
 
-    // Implement trade execution logic here
-    console.log("Executing trade:", action);
-    return {
-      success: true,
-      txHash: "0x...", // Example transaction hash
-    };
+    try {
+      // Validate trade parameters
+      if (action.amount <= 0) {
+        throw new Error("Invalid trade amount");
+      }
+
+      // Convert amount to Wei
+      const amountWei = ethers.parseEther(action.amount.toString());
+
+      // Get token contract (for ERC20 tokens)
+      if (action.tokenSymbol !== "ETH") {
+        // Implementation for ERC20 tokens would go here
+        throw new Error("Only ETH trades are currently supported");
+      }
+
+      // For ETH trades
+      const tx = await this.wallet.sendTransaction({
+        to: action.type === "BUY" ? this.wallet.address : action.tokenSymbol,
+        value: amountWei,
+        maxFeePerGas: await this.provider
+          .getFeeData()
+          .then((data) => data.maxFeePerGas),
+        maxPriorityFeePerGas: await this.provider
+          .getFeeData()
+          .then((data) => data.maxPriorityFeePerGas),
+      });
+
+      await tx.wait();
+
+      return {
+        success: true,
+        txHash: tx.hash,
+      };
+    } catch (error) {
+      console.error("Trade execution failed:", error);
+      throw error;
+    }
   }
 
   getWalletAddress(): string | null {
@@ -141,55 +172,67 @@ export class AgentKitService {
       throw new Error("Provider not initialized");
     }
 
-    if (!ethers.isAddress(tokenAddress)) {
-      console.warn(`Invalid token address: ${tokenAddress}`);
-      return "0";
-    }
-
     try {
+      // For ETH/Native token balance
+      if (
+        tokenAddress.toLowerCase() ===
+          "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
+        tokenAddress.toLowerCase() ===
+          "0x0000000000000000000000000000000000000000"
+      ) {
+        const balance = await this.provider.getBalance(address);
+        return ethers.formatEther(balance);
+      }
+
+      // Validate token address
+      if (!ethers.isAddress(tokenAddress)) {
+        console.warn(`Invalid token address: ${tokenAddress}`);
+        return "0";
+      }
+
+      // For ERC20 tokens
       const tokenContract = new ethers.Contract(
         tokenAddress,
-        ERC20_ABI,
+        [
+          "function balanceOf(address) view returns (uint256)",
+          "function decimals() view returns (uint8)",
+        ],
         this.provider
       );
 
-      // Wrap each contract call in its own try-catch to handle individual failures
-      let balance;
       try {
-        balance = await tokenContract.balanceOf(address);
-        // Check if balance is empty or invalid
-        if (!balance || balance === "0x" || balance.toString() === "0") {
+        // Get balance and decimals concurrently
+        const [balance, decimals] = await Promise.all([
+          tokenContract.balanceOf(address).catch(() => null),
+          tokenContract.decimals().catch(() => 18), // Default to 18 decimals if call fails
+        ]);
+
+        if (!balance) {
+          console.debug(`No balance found for token ${tokenAddress}`);
           return "0";
         }
-      } catch (error) {
-        console.debug(
-          `Failed to get balance for token ${tokenAddress}:`,
-          error
+
+        const formattedBalance = ethers.formatUnits(balance, decimals);
+        console.debug(`Raw balance for ${tokenAddress}: ${balance.toString()}`);
+        console.debug(`Formatted balance: ${formattedBalance}`);
+
+        // Additional validation for the formatted balance
+        const numericBalance = Number(formattedBalance);
+        if (isNaN(numericBalance) || numericBalance < 0) {
+          console.debug(`Invalid balance value for token ${tokenAddress}`);
+          return "0";
+        }
+
+        return formattedBalance;
+      } catch (contractError) {
+        console.error(
+          `Contract interaction failed for token ${tokenAddress}:`,
+          contractError
         );
         return "0";
       }
-
-      let decimals;
-      try {
-        decimals = await tokenContract.decimals();
-      } catch (error) {
-        console.debug(
-          `Failed to get decimals for token ${tokenAddress}:`,
-          error
-        );
-        return "0";
-      }
-
-      // Format the balance, defaulting to 18 decimals if decimals call failed
-      const formattedBalance = ethers.formatUnits(balance, decimals || 18);
-
-      // Return "0" if the formatted balance is not a valid number
-      return isNaN(Number(formattedBalance)) ? "0" : formattedBalance;
     } catch (error) {
-      console.debug(
-        `Token contract interaction failed for ${tokenAddress}:`,
-        error
-      );
+      console.error(`Token balance check failed for ${tokenAddress}:`, error);
       return "0";
     }
   }

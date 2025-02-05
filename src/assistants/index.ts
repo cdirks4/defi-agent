@@ -50,11 +50,11 @@ const formatTokenValue = (value: string): string => {
   }
 };
 
-const fetchTokenData = async () => {
+const fetchTokenData = async (userId: string) => {
   console.log("🔍 Fetching token data from subgraph...");
   try {
-    // Initialize AgentKit wallet
-    await agentKit.connectWallet();
+    // Initialize AgentKit wallet with userId
+    await agentKit.connectWallet(userId);
     const walletHealth = await agentKit.checkWalletHealth();
     console.log("🔐 AgentKit wallet health:", walletHealth);
 
@@ -99,8 +99,20 @@ const fetchTokenData = async () => {
   }
 };
 
-export const getDeFiAssistant = async () => {
+// Update the getDeFiAssistant function to make userId optional
+export const getDeFiAssistant = async (userId?: string) => {
   console.log("🤖 Initializing DeFi Assistant...");
+
+  // Initialize without wallet if no userId
+  let walletStatus = "Not connected";
+  if (userId) {
+    try {
+      await agentKit.connectWallet(userId);
+      walletStatus = "Connected";
+    } catch (error) {
+      console.error("Failed to connect wallet:", error);
+    }
+  }
 
   // Fetch both market and token data
   console.log("📊 Fetching market and token data...");
@@ -108,7 +120,7 @@ export const getDeFiAssistant = async () => {
     fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=ethereum,bitcoin,arbitrum&vs_currencies=usd&include_24hr_change=true"
     ),
-    fetchTokenData(),
+    fetchTokenData(userId),
   ]);
 
   const marketData = await marketResponse.json();

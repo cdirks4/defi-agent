@@ -19,12 +19,15 @@ const vapi =
 
 export default function Home() {
   const { authenticated, user } = usePrivy();
+
   const { wallets } = useWallets();
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [assistantIsSpeaking, setAssistantIsSpeaking] = useState(false);
   const [volumeLevel, setVolumeLevel] = useState(0);
-  const [agentWalletAddress, setAgentWalletAddress] = useState<string | null>(null);
+  const [agentWalletAddress, setAgentWalletAddress] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     // Check if agent wallet exists
@@ -78,7 +81,10 @@ export default function Home() {
     }
 
     setConnecting(true);
-    const assistant = await getDeFiAssistant();
+    if (!user) {
+      throw new Error();
+    }
+    const assistant = await getDeFiAssistant(user.id);
     // Add both user and agent wallet context
     const assistantConfig = {
       agentWallet: agentWalletAddress,
@@ -118,7 +124,7 @@ export default function Home() {
               {!connected ? (
                 <div className="text-center">
                   <p className="text-gray-400 mb-4">
-                    {!agentWalletAddress 
+                    {!agentWalletAddress
                       ? "Create an agent wallet in the Agent Management page to start trading"
                       : "Connect your wallet and start trading with AI assistance"}
                   </p>
