@@ -11,6 +11,9 @@ import MarketOverview from "@/components/MarketOverview";
 import TransactionHistory from "@/components/TransactionHistory";
 import { LineChart, History } from "lucide-react";
 import { agentKit } from "@/services/agentkit";
+// Remove this line
+// import TokenPurchaseDemo from "@/components/TokenPurchaseDemo";
+import AITradingTest from "@/components/AITradingTest";
 
 const vapi =
   typeof window !== "undefined"
@@ -102,7 +105,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <main className="flex min-h-screen flex-col items-center justify-between p-24">
       <div className="max-w-7xl mx-auto w-full p-6">
         {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -162,6 +165,6 @@ export default function Home() {
           <p>Powered by Arbitrum Stylus & Coinbase AgentKit</p>
         </footer>
       </div>
-    </div>
+    </main>
   );
 }

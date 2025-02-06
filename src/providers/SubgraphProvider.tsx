@@ -7,7 +7,7 @@ import React from "react";
 
 const client = createClient({
   url: SUBGRAPH_URLS[
-    (process.env.NEXT_PUBLIC_CHAIN as keyof typeof SUBGRAPH_URLS) || "TESTNET"
+    (process.env.NEXT_PUBLIC_CHAIN as keyof typeof SUBGRAPH_URLS) || "arbitrum-sepolia"
   ],
   exchanges: [cacheExchange, fetchExchange],
 });

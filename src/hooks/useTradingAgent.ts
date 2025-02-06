@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { walletService } from "@/services/wallet";
+import { tradingService } from "@/services/trading";
 import { ethers } from "ethers";
 
 interface TradingAction {
@@ -7,6 +7,7 @@ interface TradingAction {
   token: string;
   amount: string;
   price: string;
+  userId: string;
 }
 
 export function useTradingAgent() {
@@ -16,16 +17,18 @@ export function useTradingAgent() {
   const executeTrade = useCallback(async (action: TradingAction) => {
     setIsLoading(true);
     try {
-      const txHash = await walletService.executeTradeAction({
-        type: action.type,
-        params: {
-          tokenAddress: action.token,
-          amount: ethers.parseEther(action.amount),
-          price: ethers.parseEther(action.price),
-        },
+      const result = await tradingService.purchaseToken({
+        userId: action.userId,
+        tokenAddress: action.token,
+        amount: action.amount,
+        maxSlippage: 1, // 1% slippage tolerance
       });
-      setLastTransaction(txHash);
-      return txHash;
+      
+      if (result.success) {
+        setLastTransaction(result.timestamp.toString());
+      }
+      
+      return result;
     } catch (error) {
       console.error("Trade execution failed:", error);
       throw error;

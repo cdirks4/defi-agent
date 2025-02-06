@@ -1,4 +1,5 @@
 import { useQuery } from "urql";
+import { useMemo } from "react";
 
 const TOP_POOLS_QUERY = `
   query GetTopPools {
@@ -90,13 +91,47 @@ const RECENT_SWAPS_QUERY = `
   }
 `;
 
+const VALID_TOKENS_QUERY = `
+  query GetValidTokens {
+    tokens(
+      first: 20,
+      orderBy: totalValueLockedUSD,
+      orderDirection: desc,
+      where: {
+        totalValueLockedUSD_gt: "100000"
+        volumeUSD_gt: "10000"
+      }
+    ) {
+      id
+      symbol
+      name
+      decimals
+      derivedETH
+      totalValueLockedUSD
+      volumeUSD
+    }
+  }
+`;
+
 export function useTopPools() {
   const [result] = useQuery({
     query: TOP_POOLS_QUERY,
+    context: useMemo(() => ({
+      requestPolicy: 'network-only'
+    }), [])
   });
 
+  const filteredPools = useMemo(() => 
+    result.data?.pools?.filter(pool => 
+      pool?.token0?.decimals && 
+      pool?.token1?.decimals && 
+      Number(pool.totalValueLockedUSD) > 0
+    ),
+    [result.data?.pools]
+  );
+
   return {
-    pools: result.data?.pools,
+    pools: filteredPools,
     loading: result.fetching,
     error: result.error,
   };
@@ -105,11 +140,22 @@ export function useTopPools() {
 export function usePoolData(poolAddress: string) {
   const [result] = useQuery({
     query: POOL_DATA_QUERY,
-    variables: { poolAddress },
+    variables: useMemo(() => ({ poolAddress }), [poolAddress]),
+    pause: !poolAddress,
+    context: useMemo(() => ({
+      requestPolicy: 'cache-and-network'
+    }), [])
   });
 
+  const validPool = useMemo(() => 
+    result.data?.pool && 
+    result.data.pool.token0?.decimals && 
+    result.data.pool.token1?.decimals,
+    [result.data?.pool]
+  );
+
   return {
-    data: result.data?.pool,
+    data: validPool ? result.data.pool : null,
     loading: result.fetching,
     error: result.error,
   };
@@ -118,11 +164,46 @@ export function usePoolData(poolAddress: string) {
 export function useRecentSwaps(poolAddress: string, limit: number = 10) {
   const [result] = useQuery({
     query: RECENT_SWAPS_QUERY,
-    variables: { poolAddress, limit },
+    variables: useMemo(() => ({ poolAddress, limit }), [poolAddress, limit]),
+    pause: !poolAddress,
+    context: useMemo(() => ({
+      requestPolicy: 'network-only'
+    }), [])
   });
 
+  const filteredSwaps = useMemo(() => 
+    result.data?.swaps?.filter(swap => 
+      swap?.pool?.token0?.symbol && 
+      swap?.pool?.token1?.symbol
+    ),
+    [result.data?.swaps]
+  );
+
   return {
-    swaps: result.data?.swaps,
+    swaps: filteredSwaps,
+    loading: result.fetching,
+    error: result.error,
+  };
+}
+
+export function useValidTokens() {
+  const [result] = useQuery({
+    query: VALID_TOKENS_QUERY,
+    context: useMemo(() => ({
+      requestPolicy: 'cache-and-network'
+    }), [])
+  });
+
+  const filteredTokens = useMemo(() => 
+    result.data?.tokens?.filter(token => 
+      token?.decimals && 
+      Number(token.totalValueLockedUSD) > 0
+    ),
+    [result.data?.tokens]
+  );
+
+  return {
+    tokens: filteredTokens,
     loading: result.fetching,
     error: result.error,
   };

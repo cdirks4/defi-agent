@@ -1,39 +1,67 @@
 import { ethers } from "ethers";
 import { storageService } from "./storage";
 import { FAUCET_ADDRESSES } from "@/utils/testnet-tokens";
-import { MIN_REQUIRED_ETH, RPC_URLS } from "@/lib/constants";
+import { MIN_REQUIRED_ETH } from "@/lib/constants";
+import { providerService } from "./provider";
 
 class WalletService {
   private wallet: ethers.Wallet | null = null;
-  private provider: ethers.JsonRpcProvider;
+  private _provider: ethers.Provider | null = null;
   private userId: string | null = null;
 
-  constructor() {
-    // Connect to Arbitrum Sepolia testnet with fallback
-    this.provider = new ethers.JsonRpcProvider(RPC_URLS.TESTNET);
+  // Getter for provider to ensure we always have a valid one
+  get provider(): ethers.Provider | null {
+    return this._provider;
+  }
+
+  private async ensureProvider(): Promise<ethers.Provider> {
+    try {
+      if (!this._provider) {
+        console.log("Initializing provider in WalletService");
+        this._provider = await providerService.getProvider();
+      } else {
+        // Validate existing provider
+        try {
+          await this._provider.getNetwork();
+        } catch (error) {
+          console.warn("Provider validation failed, getting new provider:", error);
+          this._provider = await providerService.getProvider(true);
+        }
+      }
+      return this._provider;
+    } catch (error) {
+      console.error("Failed to ensure provider:", error);
+      throw new Error("Could not establish network connection");
+    }
   }
 
   async connectWallet(userId: string): Promise<string> {
     this.userId = userId;
-
-    // Check if user already has a wallet
-    const existingWallet = storageService.getWalletByUserId(userId);
-    if (existingWallet) {
-      return this.restoreUserWallet(existingWallet);
-    }
+    console.log("Connecting wallet for user:", userId);
 
     try {
-      // Create a new wallet for the user
-      const randomWallet = ethers.Wallet.createRandom();
-      this.wallet = randomWallet.connect(this.provider);
+      // Ensure we have a valid provider
+      const provider = await this.ensureProvider();
+      console.log("Provider ready for wallet connection");
 
-      // Encrypt the private key before storing
+      // Check if user already has a wallet
+      const existingWallet = storageService.getWalletByUserId(userId);
+      if (existingWallet) {
+        console.log("Found existing wallet for user");
+        return this.restoreUserWallet(existingWallet);
+      }
+
+      // Create a new wallet
+      console.log("Creating new wallet for user");
+      const randomWallet = ethers.Wallet.createRandom();
+      this.wallet = randomWallet.connect(provider);
+
+      // Encrypt and store wallet information
       const encryptedKey = await this.encryptPrivateKey(
         this.wallet.privateKey,
         userId
       );
 
-      // Store wallet information
       storageService.storeWallet({
         address: this.wallet.address,
         encryptedPrivateKey: encryptedKey,
@@ -42,15 +70,71 @@ class WalletService {
         lastAccessed: new Date().toISOString(),
       });
 
-      console.log("New wallet created:", {
+      console.log("New wallet created and stored:", {
         address: this.wallet.address,
         timestamp: new Date().toISOString(),
-        network: "arbitrum-sepolia",
+        network: await provider.getNetwork().then(n => n.name),
       });
 
       return this.wallet.address;
     } catch (error) {
-      console.error("Wallet creation failed:", error);
+      console.error("Wallet connection failed:", error);
+      throw error;
+    }
+  }
+
+  async fundAgentWallet(
+    agentWalletAddress: string,
+    amount: string,
+    signer: ethers.Signer
+  ): Promise<string> {
+    try {
+      console.log("Funding agent wallet:", {
+        to: agentWalletAddress,
+        amount: amount,
+      });
+
+      // Validate the amount
+      const amountWei = ethers.parseEther(amount);
+      if (amountWei <= 0n) {
+        throw new Error("Invalid amount");
+      }
+
+      // Get the current gas price
+      const provider = await this.ensureProvider();
+      const feeData = await provider.getFeeData();
+
+      // Estimate gas for the transfer
+      const gasEstimate = await provider.estimateGas({
+        to: agentWalletAddress,
+        value: amountWei,
+      });
+
+      // Add 20% buffer to gas estimate
+      const gasLimit = (gasEstimate * 120n) / 100n;
+
+      // Send the transaction
+      const tx = await signer.sendTransaction({
+        to: agentWalletAddress,
+        value: amountWei,
+        gasLimit,
+        maxFeePerGas: feeData.maxFeePerGas,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+      });
+
+      console.log("Funding transaction sent:", tx.hash);
+
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+      console.log("Funding transaction confirmed:", {
+        txHash: receipt?.hash,
+        blockNumber: receipt?.blockNumber,
+        gasUsed: receipt?.gasUsed.toString(),
+      });
+
+      return tx.hash;
+    } catch (error) {
+      console.error("Failed to fund agent wallet:", error);
       throw error;
     }
   }
@@ -59,170 +143,42 @@ class WalletService {
     privateKey: string,
     userId: string
   ): Promise<string> {
-    // In production, use a proper encryption service
-    // This is a simple example and NOT secure for production
+    // Note: This is a simple example. In production, use a proper encryption service
     return btoa(`${privateKey}:${userId}`);
   }
 
   private async decryptPrivateKey(encryptedKey: string): Promise<string> {
-    // In production, use a proper encryption service
+    // Note: This is a simple example. In production, use a proper encryption service
     const decoded = atob(encryptedKey);
     return decoded.split(":")[0];
   }
 
   private async restoreUserWallet(storedWallet: StoredWallet): Promise<string> {
     try {
+      console.log("Restoring wallet:", storedWallet.address);
+      
+      // Ensure we have a valid provider before restoring
+      const provider = await this.ensureProvider();
+      
       const privateKey = await this.decryptPrivateKey(
         storedWallet.encryptedPrivateKey
       );
-      this.wallet = new ethers.Wallet(privateKey, this.provider);
-
-      storageService.updateLastAccessed(storedWallet.address);
-
-      console.log("Wallet restored:", {
+      
+      this.wallet = new ethers.Wallet(privateKey, provider);
+      
+      // Verify the wallet is properly connected
+      const network = await provider.getNetwork();
+      console.log("Wallet restored and connected to network:", {
         address: this.wallet.address,
+        network: network.name,
         timestamp: new Date().toISOString(),
       });
 
+      storageService.updateLastAccessed(storedWallet.address);
       return this.wallet.address;
     } catch (error) {
       console.error("Failed to restore wallet:", error);
       throw error;
-    }
-  }
-
-  async transferToUserWallet(destinationAddress: string): Promise<string> {
-    if (!this.wallet) throw new Error("No wallet connected");
-
-    try {
-      // Get current balance
-      const balance = await this.provider.getBalance(this.wallet.address);
-      const minRequired = ethers.parseEther(MIN_REQUIRED_ETH);
-
-      if (balance < minRequired) {
-        throw new Error(
-          "Insufficient funds. You need at least 0.0100021 ETH to complete this transaction (including gas fees)."
-        );
-      }
-
-      // Get current network conditions
-      const feeData = await this.provider.getFeeData();
-
-      // Estimate gas for the transfer
-      const gasEstimate = await this.provider.estimateGas({
-        from: this.wallet.address,
-        to: destinationAddress,
-        value: balance,
-      });
-
-      // Calculate gas cost using current gas price
-      const gasCost = gasEstimate * (feeData.gasPrice ?? 0n);
-      const amountToSend = balance - gasCost;
-
-      if (amountToSend <= 0n) {
-        throw new Error("Insufficient funds to cover gas costs");
-      }
-
-      // Send the transaction
-      const tx = await this.wallet.sendTransaction({
-        to: destinationAddress,
-        value: amountToSend,
-        gasLimit: gasEstimate,
-        maxFeePerGas: feeData.maxFeePerGas,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
-      });
-
-      console.log("Funds returned to user:", {
-        from: this.wallet.address,
-        to: destinationAddress,
-        amount: ethers.formatEther(amountToSend),
-        txHash: tx.hash,
-      });
-
-      await tx.wait();
-      return tx.hash;
-    } catch (error) {
-      console.error("Failed to return funds:", error);
-      throw error;
-    }
-  }
-
-  async fundAgentWallet(
-    agentAddress: string,
-    amount: string,
-    signer: ethers.Signer
-  ): Promise<string> {
-    if (!ethers.isAddress(agentAddress))
-      throw new Error("Invalid agent address");
-    if (Number(amount) <= 0) throw new Error("Amount must be greater than 0");
-
-    try {
-      // Get the provider from the signer or use the default provider
-      const provider = signer.provider || this.provider;
-      if (!provider) {
-        throw new Error("No valid provider available for transaction");
-      }
-
-      // Check if connected wallet has enough balance
-      const userAddress = await signer.getAddress();
-      const userBalance = await provider.getBalance(userAddress);
-      const amountToSend = ethers.parseEther(amount);
-
-      // Get current network conditions
-      const feeData = await provider.getFeeData();
-
-      // Create transaction object for gas estimation
-      const txRequest = {
-        from: userAddress,
-        to: agentAddress,
-        value: amountToSend,
-      };
-
-      // Estimate gas for the transfer
-      const gasEstimate = await provider.estimateGas(txRequest);
-
-      // Calculate total cost (amount + gas)
-      const gasCost = gasEstimate * (feeData.gasPrice ?? 0n);
-      const totalCost = amountToSend + gasCost;
-
-      if (userBalance < totalCost) {
-        throw new Error(
-          `Insufficient funds. Total required: ${ethers.formatEther(
-            totalCost
-          )} ETH (including gas fees)`
-        );
-      }
-
-      // Send the transaction with estimated gas and current network fees
-      const tx = await signer.sendTransaction({
-        ...txRequest,
-        gasLimit: gasEstimate,
-        maxFeePerGas: feeData.maxFeePerGas,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
-      });
-
-      console.log("Agent wallet funded:", {
-        from: userAddress,
-        to: agentAddress,
-        amount,
-        gasLimit: gasEstimate.toString(),
-        txHash: tx.hash,
-      });
-
-      await tx.wait();
-      return tx.hash;
-    } catch (error: any) {
-      console.error("Failed to fund agent wallet:", error);
-      // Enhance error message for common issues
-      if (error.code === "INSUFFICIENT_FUNDS") {
-        throw new Error(
-          "Insufficient funds to cover the transaction amount and gas fees"
-        );
-      } else if (error.code === "UNPREDICTABLE_GAS_LIMIT") {
-        throw new Error("Unable to estimate gas. The transaction may fail");
-      } else {
-        throw error;
-      }
     }
   }
 
@@ -235,23 +191,41 @@ class WalletService {
     }
 
     try {
-      // Create a real transaction
-      const tx = await this.wallet.sendTransaction({
-        to: action.params.tokenAddress,
-        value: action.params.amount,
-        gasLimit: BigInt(100000),
+      // Ensure provider is valid before executing trade
+      await this.ensureProvider();
+
+      console.log("Executing trade action:", {
+        type: action.type,
+        params: {
+          ...action.params,
+          amount: ethers.formatEther(action.params.amount),
+        },
       });
+
+      // Create transaction based on action type
+      let tx;
+      if (action.type === "WRAP_ETH") {
+        tx = await this.wallet.sendTransaction({
+          to: action.params.tokenAddress,
+          value: BigInt(action.params.amount),
+          data: "0xd0e30db0", // deposit() function selector
+        });
+      } else {
+        tx = await this.wallet.sendTransaction({
+          to: action.params.tokenAddress,
+          value: BigInt(action.params.amount),
+          gasLimit: BigInt(100000),
+        });
+      }
 
       console.log("Transaction sent:", {
-        action,
+        action: action.type,
         txHash: tx.hash,
         walletAddress: this.wallet.address,
-        timestamp: new Date().toISOString(),
       });
 
-      // Wait for transaction to be mined
+      // Wait for transaction confirmation
       const receipt = await tx.wait();
-
       console.log("Transaction confirmed:", {
         txHash: receipt?.hash,
         blockNumber: receipt?.blockNumber,
@@ -260,7 +234,7 @@ class WalletService {
 
       return tx.hash;
     } catch (error) {
-      console.error("Transaction failed:", error);
+      console.error("Trade action failed:", error);
       throw error;
     }
   }
@@ -271,18 +245,18 @@ class WalletService {
     }
 
     try {
+      const provider = await this.ensureProvider();
+
       if (tokenAddress) {
-        // For ERC20 tokens
         const contract = new ethers.Contract(
           tokenAddress,
           ["function balanceOf(address) view returns (uint256)"],
-          this.provider
+          provider
         );
         const balance = await contract.balanceOf(this.wallet.address);
         return balance.toString();
       } else {
-        // For native ETH
-        const balance = await this.provider.getBalance(this.wallet.address);
+        const balance = await provider.getBalance(this.wallet.address);
         return balance.toString();
       }
     } catch (error) {
@@ -291,12 +265,12 @@ class WalletService {
     }
   }
 
-  // Helper method to get testnet tokens
   async getTestnetTokens(userAddress: string): Promise<void> {
     if (!this.wallet) throw new Error("No wallet connected");
 
     try {
-      // For this example, we'll use a simple faucet contract call
+      const provider = await this.ensureProvider();
+      
       const faucetContract = new ethers.Contract(
         FAUCET_ADDRESSES.ETH,
         ["function drip(address recipient) external"],
@@ -309,12 +283,11 @@ class WalletService {
       console.log("Received testnet ETH:", {
         recipient: userAddress,
         faucet: FAUCET_ADDRESSES.ETH,
+        network: await provider.getNetwork().then(n => n.name),
       });
     } catch (error) {
       console.error("Failed to get testnet tokens:", error);
-      throw new Error(
-        "Failed to request testnet funds. Please try again later."
-      );
+      throw new Error("Failed to request testnet funds. Please try again later.");
     }
   }
 }

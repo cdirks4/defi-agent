@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import WalletConnect from "./WalletConnect";
+import { LineChart, Home, History } from "lucide-react";
 
 const Navigation = () => {
   const pathname = usePathname();
 
   const isActive = (path: string) => {
-    return pathname === path ? "text-[var(--primary)]" : "text-foreground hover:text-[var(--primary)]";
+    return pathname === path
+      ? "text-[var(--primary)]"
+      : "text-foreground hover:text-[var(--primary)]";
   };
 
   return (
@@ -22,10 +25,19 @@ const Navigation = () => {
             <Link href="/" className={`${isActive("/")} transition-colors`}>
               Home
             </Link>
-            <Link href="/agent" className={`${isActive("/agent")} transition-colors`}>
+            <Link
+              href="/agent"
+              className={`${isActive("/agent")} transition-colors`}
+            >
               Agent Management
             </Link>
           </div>
+          <Link
+            href="/trading"
+            className={`${isActive("/trading")} transition-colors`}
+          >
+            Trading
+          </Link>
         </div>
         <WalletConnect onConnect={() => null} />
       </div>

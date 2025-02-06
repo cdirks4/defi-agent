@@ -82,22 +82,41 @@ class UniswapService {
   }
 
   async getPoolData() {
-    const tokens = await this.getTokens();
+    try {
+      const tokens = await this.getTokens();
 
-    // Get ETH price from a reliable pool
-    const ethPrice = 2000; // In production, fetch this from an oracle
+      if (!tokens || !Array.isArray(tokens)) {
+        throw new Error("Invalid token data received");
+      }
 
-    // Map tokens to include USD prices and filter out any with invalid derivedETH
-    const inputTokens = tokens
-      .filter((token) => Number(token.derivedETH) > 0)
-      .map((token) => ({
-        ...token,
-        priceUSD: (Number(token.derivedETH) * ethPrice).toString(),
-      }));
+      // Get ETH price from a reliable pool
+      const ethPrice = 2000; // In production, fetch this from an oracle
 
-    return {
-      inputTokens,
-    };
+      // Map tokens to include USD prices and filter out any with invalid derivedETH
+      const inputTokens = tokens
+        .filter((token) => 
+          token && 
+          token.id && 
+          token.symbol && 
+          Number(token.derivedETH) > 0 &&
+          Number(token.totalValueLockedUSD) > 0
+        )
+        .map((token) => ({
+          ...token,
+          priceUSD: (Number(token.derivedETH) * ethPrice).toString(),
+        }));
+
+      if (!inputTokens.length) {
+        throw new Error("No valid tokens found");
+      }
+
+      return {
+        inputTokens,
+      };
+    } catch (error) {
+      console.error("Failed to fetch pool data:", error);
+      return { inputTokens: [] };
+    }
   }
 
   async getRecentSwaps(limit: number = 10) {

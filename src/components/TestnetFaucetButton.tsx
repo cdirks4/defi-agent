@@ -11,7 +11,10 @@ interface TestnetFaucetButtonProps {
 
 // This button appears when users have insufficient funds (less than 0.0100021 ETH)
 // to complete transactions on Arbitrum Sepolia
-const TestnetFaucetButton = ({ userAddress, onSuccess }: TestnetFaucetButtonProps) => {
+const TestnetFaucetButton = ({
+  userAddress,
+  onSuccess,
+}: TestnetFaucetButtonProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +26,9 @@ const TestnetFaucetButton = ({ userAddress, onSuccess }: TestnetFaucetButtonProp
       await walletService.getTestnetTokens(userAddress);
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to request testnet funds");
+      setError(
+        err instanceof Error ? err.message : "Failed to request testnet funds"
+      );
     } finally {
       setIsLoading(false);
     }
