@@ -75,13 +75,13 @@ export default function TradingDashboard() {
             </div>
 
             {/* Market Overview Section */}
-            <div className="card">
+            {/* <div className="card">
               <div className="flex items-center space-x-2 mb-6">
                 <TrendingUp className="w-5 h-5 text-[var(--primary)]" />
                 <h2 className="text-xl font-semibold">Market Analysis</h2>
               </div>
               <MarketOverview />
-            </div>
+            </div> */}
           </div>
 
           {/* Right Column - Trade History */}

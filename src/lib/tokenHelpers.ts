@@ -15,10 +15,14 @@ export async function getTokenDetails(tokenContract: ethers.Contract): Promise<T
     const networkWETH = WRAPPED_NATIVE_TOKEN[chain];
 
     // Check if the token is WETH by comparing normalized addresses
-    const isWETH = tokenContract.address.toLowerCase() === networkWETH.address.toLowerCase();
+    const tokenAddress = tokenContract.getAddress ? 
+      await tokenContract.getAddress() : 
+      tokenContract.address;
+    
+    const isWETH = tokenAddress.toLowerCase() === networkWETH.address.toLowerCase();
 
     console.log("Token details check:", {
-      tokenAddress: tokenContract.address.toLowerCase(),
+      tokenAddress: tokenAddress.toLowerCase(),
       networkWETH: networkWETH.address,
       isWETH,
       chain
@@ -32,35 +36,55 @@ export async function getTokenDetails(tokenContract: ethers.Contract): Promise<T
       };
     }
 
-    // Try to get decimals and symbol concurrently
-    const [decimals, symbol] = await Promise.all([
-      tokenContract.decimals().catch((error: any) => {
-        console.warn("Failed to fetch token decimals:", error);
-        return DEFAULT_DECIMALS;
-      }),
-      tokenContract.symbol().catch((error: any) => {
-        console.warn("Failed to fetch token symbol:", error);
-        return "UNKNOWN";
-      })
-    ]);
+    // Get decimals with enhanced error handling
+    let decimals: number;
+    try {
+      decimals = await tokenContract.decimals();
+      if (typeof decimals !== 'number' || isNaN(decimals)) {
+        console.warn(`Invalid decimals response for token ${tokenAddress}, using default`);
+        decimals = DEFAULT_DECIMALS;
+      }
+    } catch (error) {
+      console.warn(
+        `Failed to fetch decimals for token ${tokenAddress} (${
+          error instanceof Error && !error.data ? "missing revert data" : error instanceof Error ? error.message : "unknown error"
+        }), using default`
+      );
+      decimals = DEFAULT_DECIMALS;
+    }
 
-    // Validate decimals
-    const validatedDecimals = typeof decimals === 'number' && !isNaN(decimals) 
-      ? decimals 
-      : DEFAULT_DECIMALS;
+    // Get symbol with enhanced error handling
+    let symbol: string;
+    try {
+      symbol = await tokenContract.symbol();
+      if (!symbol) {
+        console.warn(`Empty symbol response for token ${tokenAddress}, using UNKNOWN`);
+        symbol = "UNKNOWN";
+      }
+    } catch (error) {
+      console.warn(
+        `Failed to fetch symbol for token ${tokenAddress} (${
+          error instanceof Error && !error.data ? "missing revert data" : error instanceof Error ? error.message : "unknown error"
+        }), using UNKNOWN`
+      );
+      symbol = "UNKNOWN";
+    }
 
     console.log("Token details retrieved:", {
-      address: tokenContract.address,
-      symbol: symbol || "UNKNOWN",
-      decimals: validatedDecimals
+      address: tokenAddress,
+      symbol,
+      decimals
     });
 
     return {
-      decimals: validatedDecimals,
-      symbol: symbol || "UNKNOWN"
+      decimals,
+      symbol
     };
   } catch (error) {
     console.error("Error fetching token details:", error);
+    const formattedError = (await import("./formatError")).formatContractError(error);
+    console.error(`Token contract error details: ${formattedError}`);
+    
     return {
       decimals: DEFAULT_DECIMALS,
       symbol: "UNKNOWN"

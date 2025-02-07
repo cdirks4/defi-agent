@@ -3,10 +3,14 @@ import { usePrivy } from "@privy-io/react-auth";
 import { agentKit } from "@/services/agentkit";
 import { uniswapService } from "@/services/uniswap";
 import { ethers } from "ethers";
-import { RPC_URLS } from "@/lib/constants";
+import { RPC_URLS, WETH_ADDRESSES } from "@/lib/constants";
 import Spinner from "./base/Spinner";
+import { TOKEN_ADDRESSES, ERC20_ABI } from "@/lib/constants";
+import TokenTransferButton from "./TokenTransferButton";
+import UnwrapWethButton from "./UnwrapWethButton";
 
 interface TokenBalance {
+  id: string;
   symbol: string;
   balance: string;
   usdValue: string;
@@ -57,113 +61,85 @@ export function WalletOverview() {
         setLoading(true);
         setError(null);
 
-        // Get token list and ETH price from Uniswap
-        const poolData = await uniswapService.getPoolData();
-        const tokens = poolData.inputTokens.filter((token) => {
-          if (!token.symbol || !token.id || !token.priceUSD) {
-            console.debug(`Skipping token due to missing data:`, token);
-            return false;
-          }
-          
-          if (!ethers.isAddress(token.id)) {
-            console.debug(`Skipping token with invalid address: ${token.id}`);
-            return false;
-          }
-          
-          const price = Number(token.priceUSD);
-          if (isNaN(price) || price <= 0) {
-            console.debug(`Skipping token with invalid price: ${token.symbol}`);
-            return false;
-          }
-          
-          return true;
-        });
-
         const provider = await getProvider();
+        const network = process.env.NEXT_PUBLIC_CHAIN || "arbitrum-sepolia";
+        const tokenList =
+          TOKEN_ADDRESSES[network as keyof typeof TOKEN_ADDRESSES];
 
-        // User native balance
-        const userNativeBalance = await provider.getBalance(user.wallet.address);
-        const userNativeFormatted = ethers.formatEther(userNativeBalance);
+        // Fetch native balances
+        const [userNativeBalance, agentNativeBalance] = await Promise.all([
+          provider.getBalance(user.wallet.address),
+          agentKit.getWalletAddress()
+            ? provider.getBalance(agentKit.getWalletAddress())
+            : BigInt(0),
+        ]);
+
         setUserNative({
-          balance: Number(userNativeFormatted).toFixed(4),
-          usdValue: (Number(userNativeFormatted) * 2000).toFixed(2),
+          balance: Number(ethers.formatEther(userNativeBalance)).toFixed(4),
+          usdValue: (
+            Number(ethers.formatEther(userNativeBalance)) * 2000
+          ).toFixed(2),
         });
 
-        // Agent native balance
-        const agentAddress = agentKit.getWalletAddress();
-        if (agentAddress) {
-          const agentNativeBalance = await provider.getBalance(agentAddress);
-          const agentNativeFormatted = ethers.formatEther(agentNativeBalance);
+        if (agentKit.getWalletAddress()) {
           setAgentNative({
-            balance: Number(agentNativeFormatted).toFixed(4),
-            usdValue: (Number(agentNativeFormatted) * 2000).toFixed(2),
+            balance: Number(ethers.formatEther(agentNativeBalance)).toFixed(4),
+            usdValue: (
+              Number(ethers.formatEther(agentNativeBalance)) * 2000
+            ).toFixed(2),
           });
         }
 
-        // Fetch user token balances for all tokens
-        const userBalances = await Promise.all(
-          tokens.map(async (token) => {
-            try {
-              const balance = await agentKit.getTokenBalance(
-                user.wallet.address,
-                token.id
-              );
+        // Fetch token balances
+        const fetchTokenBalance = async (
+          address: string,
+          tokenAddress: string,
+          symbol: string
+        ) => {
+          try {
+            const contract = new ethers.Contract(
+              tokenAddress,
+              ERC20_ABI,
+              provider
+            );
+            const [balance, decimals] = await Promise.all([
+              contract.balanceOf(address),
+              contract.decimals(),
+            ]);
 
-              const numBalance = Number(balance);
-              const usdValue = (numBalance * Number(token.priceUSD)).toFixed(2);
+            const formatted = ethers.formatUnits(balance, decimals);
+            return {
+              id: tokenAddress,
+              symbol,
+              balance: Number(formatted).toFixed(4),
+              usdValue: (Number(formatted) * 2000).toFixed(2), // Using fixed price for demo
+            };
+          } catch (error) {
+            console.debug(`Error fetching balance for ${symbol}:`, error);
+            return {
+              id: tokenAddress,
+              symbol,
+              balance: "0.0000",
+              usdValue: "0.00",
+            };
+          }
+        };
 
-              return {
-                symbol: token.symbol,
-                balance: numBalance.toFixed(4),
-                usdValue,
-              };
-            } catch (error) {
-              console.debug(
-                `Error fetching balance for ${token.symbol} (${token.id}):`,
-                error
-              );
-              return {
-                symbol: token.symbol,
-                balance: "0.0000",
-                usdValue: "0.00",
-              };
-            }
-          })
+        // Fetch user token balances
+        const userBalancePromises = Object.entries(tokenList).map(
+          ([symbol, address]) =>
+            fetchTokenBalance(user.wallet.address, address, symbol)
         );
-
+        const userBalances = await Promise.all(userBalancePromises);
         setUserTokens(userBalances);
 
-        // Fetch agent token balances for all tokens
-        if (agentAddress) {
-          const agentBalances = await Promise.all(
-            tokens.map(async (token) => {
-              try {
-                const balance = await agentKit.getTokenBalance(
-                  agentAddress,
-                  token.id
-                );
-
-                const numBalance = Number(balance);
-                const usdValue = (numBalance * Number(token.priceUSD)).toFixed(2);
-
-                return {
-                  symbol: token.symbol,
-                  balance: numBalance.toFixed(4),
-                  usdValue,
-                };
-              } catch (error) {
-                console.debug(
-                  `Error fetching agent balance for ${token.symbol}:`,
-                  error
-                );
-                return {
-                  symbol: token.symbol,
-                  balance: "0.0000",
-                  usdValue: "0.00",
-                };
-              }
-            })
+        // Fetch agent token balances
+        if (agentKit.getWalletAddress()) {
+          const agentBalancePromises = Object.entries(tokenList).map(
+            ([symbol, address]) =>
+              fetchTokenBalance(agentKit.getWalletAddress()!, address, symbol)
           );
+          const agentBalances = await Promise.all(agentBalancePromises);
           setAgentTokens(agentBalances);
         }
       } catch (error) {
@@ -171,7 +147,7 @@ export function WalletOverview() {
         setError(
           error instanceof Error
             ? error.message
-            : "Failed to load wallet balances. Please try again later."
+            : "Failed to load wallet balances"
         );
       } finally {
         setLoading(false);
@@ -217,15 +193,21 @@ export function WalletOverview() {
           )}
           {/* Token Cards */}
           {userTokens.map((token) => (
-            <div 
-              key={token.symbol} 
+            <div
+              key={token.id}
               className={`bg-gray-700 p-3 rounded ${
-                Number(token.balance) > 0 ? 'border border-green-500' : ''
+                Number(token.balance) > 0 ? "border border-green-500" : ""
               }`}
             >
               <div className="font-medium">{token.symbol}</div>
               <div>{token.balance}</div>
               <div className="text-sm text-gray-400">${token.usdValue}</div>
+              {token.symbol === "WETH" && Number(token.balance) > 0 && (
+                <UnwrapWethButton
+                  walletAddress={user?.wallet?.address || ""}
+                  balance={token.balance}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -244,17 +226,27 @@ export function WalletOverview() {
               </div>
             </div>
           )}
-          {/* Token Cards */}
+          {/* Token Cards with Transfer Buttons */}
           {agentTokens.map((token) => (
-            <div 
-              key={token.symbol} 
+            <div
+              key={token.id}
               className={`bg-gray-700 p-3 rounded ${
-                Number(token.balance) > 0 ? 'border border-green-500' : ''
+                Number(token.balance) > 0 ? "border border-green-500" : ""
               }`}
             >
               <div className="font-medium">{token.symbol}</div>
               <div>{token.balance}</div>
               <div className="text-sm text-gray-400">${token.usdValue}</div>
+              {Number(token.balance) > 0 && user?.wallet?.address && (
+                <div className="mt-2">
+                  <TokenTransferButton
+                    userWalletAddress={user.wallet.address}
+                    agentWalletAddress={agentKit.getWalletAddress() || ""}
+                    tokenAddress={token.id}
+                    tokenSymbol={token.symbol}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>

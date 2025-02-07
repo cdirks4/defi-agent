@@ -1,6 +1,10 @@
 import { Redis } from "@upstash/redis";
-// UPSTASH_REDIS_REST_URL = "https://darling-muskrat-30013.upstash.io";
-// UPSTASH_REDIS_REST_TOKEN = "";
+
+interface ZAddOptions {
+  score: number;
+  member: string;
+}
+
 class RedisService {
   private client: Redis | null = null;
 
@@ -15,8 +19,8 @@ class RedisService {
       }
 
       this.client = new Redis({
-        url: "https://darling-muskrat-30013.upstash.io",
-        token: "AXU9AAIjcDFkZTQzMWMxZjQ1NTA0ZGIwYTBkZTUzOWZiOTNiNjk0MXAxMA",
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN,
       });
     } catch (error) {
       console.error("Failed to initialize Redis client:", error);
@@ -43,6 +47,48 @@ class RedisService {
       await this.client.set(key, value, options);
     } catch (error) {
       console.error(`Redis set error for key ${key}:`, error);
+    }
+  }
+
+  async zadd(key: string, scoreMembers: ZAddOptions): Promise<number | null> {
+    try {
+      if (!this.client) {
+        return null;
+      }
+      return await this.client.zadd(key, { [scoreMembers.member]: scoreMembers.score });
+    } catch (error) {
+      console.error(`Redis zadd error for key ${key}:`, error);
+      return null;
+    }
+  }
+
+  async zrange(
+    key: string, 
+    start: number, 
+    stop: number, 
+    options?: { rev?: boolean }
+  ): Promise<string[]> {
+    try {
+      if (!this.client) {
+        return [];
+      }
+      const command = options?.rev ? 'zrevrange' : 'zrange';
+      return await this.client[command](key, start, stop) as string[];
+    } catch (error) {
+      console.error(`Redis zrange error for key ${key}:`, error);
+      return [];
+    }
+  }
+
+  async del(key: string): Promise<number> {
+    try {
+      if (!this.client) {
+        return 0;
+      }
+      return await this.client.del(key);
+    } catch (error) {
+      console.error(`Redis del error for key ${key}:`, error);
+      return 0;
     }
   }
 }

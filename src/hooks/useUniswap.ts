@@ -1,5 +1,6 @@
 import { useQuery } from "urql";
 import { useMemo } from "react";
+import { Pool, PoolsResponse, SwapsResponse, TokensResponse } from "@/types/uniswap";
 
 const TOP_POOLS_QUERY = `
   query GetTopPools {
@@ -114,7 +115,7 @@ const VALID_TOKENS_QUERY = `
 `;
 
 export function useTopPools() {
-  const [result] = useQuery({
+  const [result] = useQuery<PoolsResponse>({
     query: TOP_POOLS_QUERY,
     context: useMemo(() => ({
       requestPolicy: 'network-only'
@@ -122,10 +123,10 @@ export function useTopPools() {
   });
 
   const filteredPools = useMemo(() => 
-    result.data?.pools?.filter(pool => 
-      pool?.token0?.decimals && 
+    result.data?.pools?.filter((pool): pool is Pool => 
+      Boolean(pool?.token0?.decimals && 
       pool?.token1?.decimals && 
-      Number(pool.totalValueLockedUSD) > 0
+      Number(pool.totalValueLockedUSD) > 0)
     ),
     [result.data?.pools]
   );
@@ -138,7 +139,7 @@ export function useTopPools() {
 }
 
 export function usePoolData(poolAddress: string) {
-  const [result] = useQuery({
+  const [result] = useQuery<{ pool: Pool }>({
     query: POOL_DATA_QUERY,
     variables: useMemo(() => ({ poolAddress }), [poolAddress]),
     pause: !poolAddress,
@@ -162,7 +163,7 @@ export function usePoolData(poolAddress: string) {
 }
 
 export function useRecentSwaps(poolAddress: string, limit: number = 10) {
-  const [result] = useQuery({
+  const [result] = useQuery<SwapsResponse>({
     query: RECENT_SWAPS_QUERY,
     variables: useMemo(() => ({ poolAddress, limit }), [poolAddress, limit]),
     pause: !poolAddress,
@@ -187,7 +188,7 @@ export function useRecentSwaps(poolAddress: string, limit: number = 10) {
 }
 
 export function useValidTokens() {
-  const [result] = useQuery({
+  const [result] = useQuery<TokensResponse>({
     query: VALID_TOKENS_QUERY,
     context: useMemo(() => ({
       requestPolicy: 'cache-and-network'

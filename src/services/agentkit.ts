@@ -27,17 +27,49 @@ export class AgentKitService {
     return this.wallet;
   }
 
+  async ensureWalletConnected(
+    userId: string,
+    createIfNotExist: boolean = true
+  ): Promise<ethers.Wallet> {
+    console.debug("Ensuring wallet connection:", {
+      userId,
+      createIfNotExist,
+      currentWalletStatus: this.wallet ? 'connected' : 'not connected'
+    });
+
+    if (!this.wallet) {
+      console.debug("No active wallet connection, attempting to connect...", {
+        userId,
+        createIfNotExist
+      });
+      const connected = await this.connectWallet(userId, createIfNotExist);
+      if (!connected) {
+        const error = createIfNotExist
+          ? "Failed to connect or create agent wallet"
+          : `No existing agent wallet found for user: ${userId}`;
+        console.debug("Wallet connection failed:", error);
+        throw new Error(error);
+      }
+    }
+
+    console.debug("Wallet connection ensured:", {
+      address: this.wallet?.address,
+      userId
+    });
+    return this.wallet;
+  }
+
   private async ensureProvider(): Promise<ethers.Provider> {
     try {
       if (!this._provider) {
-        console.log("Initializing provider in AgentKitService");
+        console.debug("Initializing provider in AgentKitService");
         this._provider = await providerService.getProvider();
       } else {
         // Validate existing provider
         try {
           await this._provider.getNetwork();
         } catch (error) {
-          console.warn(
+          console.debug(
             "Provider validation failed in AgentKit, getting new provider:",
             error
           );
@@ -51,53 +83,110 @@ export class AgentKitService {
     }
   }
 
-  async connectWallet(userId: string) {
+  async connectWallet(
+    userId: string,
+    createIfNotExist: boolean = true
+  ): Promise<boolean> {
     try {
-      // First check if a wallet already exists for this user
-      const existingWallet = storageService.getWalletByUserId(userId);
-
-      // Ensure we have a valid provider
-      const provider = await this.ensureProvider();
-      console.log("Provider ready for agent wallet connection");
-
-      if (existingWallet) {
-        // Restore existing wallet
-        const privateKey = await this.decryptPrivateKey(
-          existingWallet.encryptedPrivateKey
-        );
-        this.wallet = new ethers.Wallet(privateKey, provider);
-        console.log("🔐 Existing agent wallet restored:", {
+      // First check if wallet is already connected
+      if (this.wallet) {
+        console.debug("Wallet already connected:", {
           address: this.wallet.address,
-          network: await provider.getNetwork().then((n) => n.name),
+          network: await this.provider?.getNetwork().then((n) => n.name),
+          userId
         });
         return true;
       }
 
-      // If no existing wallet, create a new one
-      const newWallet = ethers.Wallet.createRandom().connect(provider);
-      this.wallet = newWallet;
-
-      // Encrypt and store the new wallet
-      const encryptedKey = await this.encryptPrivateKey(
-        newWallet.privateKey,
-        userId
-      );
-      storageService.storeWallet({
-        address: newWallet.address,
-        encryptedPrivateKey: encryptedKey,
+      console.debug("Starting wallet connection process:", {
         userId,
-        createdAt: new Date().toISOString(),
-        lastAccessed: new Date().toISOString(),
+        createIfNotExist,
+        storedWallets: await storageService.debugPrintWallets()
       });
 
-      console.log("🔐 New agent wallet created:", {
-        address: this.wallet.address,
-        network: await provider.getNetwork().then((n) => n.name),
-      });
-      return true;
-    } catch (error) {
-      console.error("Failed to connect agent wallet:", error);
+      // Check for existing wallet in storage
+      const existingWallet = storageService.getWalletByUserId(userId);
+      const provider = await this.ensureProvider();
+
+      if (existingWallet) {
+        try {
+          console.debug("Found existing wallet in storage:", {
+            address: existingWallet.address,
+            userId: existingWallet.userId,
+            lastAccessed: existingWallet.lastAccessed,
+            createdAt: existingWallet.createdAt
+          });
+
+          const privateKey = await this.decryptPrivateKey(
+            existingWallet.encryptedPrivateKey
+          );
+          
+          // Verify the decrypted private key format
+          if (!privateKey.match(/^0x[0-9a-fA-F]{64}$/)) {
+            console.debug("Invalid private key format after decryption");
+            if (!createIfNotExist) return false;
+          }
+
+          this.wallet = new ethers.Wallet(privateKey, provider);
+          console.debug("Successfully restored existing agent wallet:", {
+            address: this.wallet.address,
+            network: await provider.getNetwork().then((n) => n.name),
+            userId
+          });
+          
+          storageService.updateLastAccessed(this.wallet.address);
+          return true;
+        } catch (error) {
+          console.debug("Failed to restore existing wallet:", {
+            error,
+            userId,
+            walletAddress: existingWallet.address
+          });
+          if (!createIfNotExist) {
+            return false;
+          }
+        }
+      } else {
+        console.debug("No existing wallet found in storage for userId:", userId);
+        if (!createIfNotExist) {
+          return false;
+        }
+      }
+
+      // Only create new wallet if createIfNotExist is true
+      if (createIfNotExist) {
+        console.debug("Creating new agent wallet:", { userId });
+        const newWallet = ethers.Wallet.createRandom().connect(provider);
+        this.wallet = newWallet;
+
+        const encryptedKey = await this.encryptPrivateKey(
+          newWallet.privateKey,
+          userId
+        );
+        
+        const walletData = {
+          address: newWallet.address,
+          encryptedPrivateKey: encryptedKey,
+          userId,
+          createdAt: new Date().toISOString(),
+          lastAccessed: new Date().toISOString(),
+        };
+        
+        storageService.storeWallet(walletData);
+
+        console.debug("New agent wallet created and stored:", {
+          address: this.wallet.address,
+          network: await provider.getNetwork().then((n) => n.name),
+          userId: userId,
+          createdAt: walletData.createdAt
+        });
+        return true;
+      }
+
       return false;
+    } catch (error) {
+      console.error("Failed to connect wallet:", error);
+      throw error;
     }
   }
 
@@ -110,221 +199,44 @@ export class AgentKitService {
   }
 
   private async decryptPrivateKey(encryptedKey: string): Promise<string> {
-    // Note: This is a simple example. In production, use a proper encryption service
-    const decoded = atob(encryptedKey);
-    return decoded.split(":")[0];
+    try {
+      // Note: This is a simple example. In production, use a proper encryption service
+      const decoded = atob(encryptedKey);
+      const [privateKey, userId] = decoded.split(":");
+      
+      if (!privateKey || !userId) {
+        throw new Error("Invalid encrypted key format");
+      }
+      
+      return privateKey;
+    } catch (error) {
+      console.error("Failed to decrypt private key:", error);
+      throw new Error("Failed to decrypt wallet key");
+    }
   }
 
-  async checkWalletHealth(): Promise<WalletHealth> {
-    if (!this.wallet) {
-      throw new Error("Agent wallet not connected");
-    }
-
+  async initializeFromData(walletData: {
+    address: string;
+    encryptedPrivateKey: string;
+    userId: string;
+  }) {
     try {
       const provider = await this.ensureProvider();
-      const balance = await provider.getBalance(this.wallet.address);
-
-      return {
-        isConnected: true,
-        balance: ethers.formatEther(balance),
-        allowance: "1000.0", // Example allowance
-      };
-    } catch (error) {
-      console.error("Failed to check agent wallet health:", error);
-      throw error;
-    }
-  }
-
-  async getBalance(): Promise<string> {
-    if (!this.wallet) {
-      throw new Error("Agent wallet not connected");
-    }
-
-    try {
-      const provider = await this.ensureProvider();
-      const balance = await provider.getBalance(this.wallet.address);
-      return ethers.formatEther(balance);
-    } catch (error) {
-      console.error("Failed to get agent wallet balance:", error);
-      throw error;
-    }
-  }
-
-  async getTokenBalance(
-    address: string,
-    tokenAddress: string
-  ): Promise<string> {
-    try {
-      const provider = await this.ensureProvider();
-
-      // For ETH/Native token balance
-      if (
-        tokenAddress.toLowerCase() ===
-          "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
-        tokenAddress.toLowerCase() ===
-          "0x0000000000000000000000000000000000000000"
-      ) {
-        const balance = await provider.getBalance(address);
-        return ethers.formatEther(balance);
+      const privateKey = await this.decryptPrivateKey(walletData.encryptedPrivateKey);
+      this.wallet = new ethers.Wallet(privateKey, provider);
+      
+      if (this.wallet.address.toLowerCase() !== walletData.address.toLowerCase()) {
+        throw new Error("Wallet address mismatch");
       }
-
-      // Validate token address
-      if (!ethers.isAddress(tokenAddress)) {
-        console.warn(`Invalid token address: ${tokenAddress}`);
-        return "0";
-      }
-
-      // For ERC20 tokens
-      const tokenContract = new ethers.Contract(
-        tokenAddress,
-        [
-          "function balanceOf(address) view returns (uint256)",
-          "function decimals() view returns (uint8)",
-        ],
-        provider
-      );
-
-      try {
-        // Get balance and decimals concurrently
-        const [balance, decimals] = await Promise.all([
-          tokenContract.balanceOf(address).catch(() => null),
-          tokenContract.decimals().catch(() => 18), // Default to 18 decimals if call fails
-        ]);
-
-        if (!balance) {
-          console.debug(`No balance found for token ${tokenAddress}`);
-          return "0";
-        }
-
-        const formattedBalance = ethers.formatUnits(balance, decimals);
-        console.debug(`Raw balance for ${tokenAddress}: ${balance.toString()}`);
-        console.debug(`Formatted balance: ${formattedBalance}`);
-
-        // Additional validation for the formatted balance
-        const numericBalance = Number(formattedBalance);
-        if (isNaN(numericBalance) || numericBalance < 0) {
-          console.debug(`Invalid balance value for token ${tokenAddress}`);
-          return "0";
-        }
-
-        return formattedBalance;
-      } catch (contractError) {
-        console.error(
-          `Contract interaction failed for token ${tokenAddress}:`,
-          contractError
-        );
-        return "0";
-      }
-    } catch (error) {
-      console.error(`Token balance check failed for ${tokenAddress}:`, error);
-      return "0";
-    }
-  }
-
-  async getTokenValueUSD(
-    tokenAddress: string,
-    balance: string
-  ): Promise<string> {
-    try {
-      // Get token price from Uniswap pool
-      const poolData = await uniswapService.getPoolData();
-      const token = poolData.inputTokens.find(
-        (t) => t.id.toLowerCase() === tokenAddress.toLowerCase()
-      );
-      if (!token) return "0";
-
-      const valueUSD = Number(balance) * Number(token.priceUSD);
-      return valueUSD.toFixed(2);
-    } catch (error) {
-      console.error("Failed to get token USD value:", error);
-      return "0";
-    }
-  }
-
-  async fundAgentWallet(amount: string) {
-    if (!this.wallet) {
-      throw new Error("Agent wallet not connected");
-    }
-
-    try {
-      await this.ensureProvider();
-      // Fund the agent wallet with ETH
-      const tx = await this.wallet.sendTransaction({
-        to: this.wallet.address,
-        value: ethers.parseEther(amount),
-      });
-      await tx.wait();
+  
       return true;
     } catch (error) {
-      console.error("Failed to fund agent wallet:", error);
-      return false;
+      console.error("Failed to initialize wallet from data:", error);
+      throw new Error("Failed to initialize agent wallet");
     }
   }
-
   getWalletAddress(): string | null {
     return this.wallet?.address || null;
-  }
-
-  async transferFunds(
-    destinationAddress: string,
-    amount: bigint
-  ): Promise<string> {
-    if (!this.wallet) {
-      throw new Error("Agent wallet not connected");
-    }
-
-    try {
-      const provider = await this.ensureProvider();
-
-      // Get current balance
-      const balance =
-        ((await provider.getBalance(this.wallet.address)) * 85n) / 100n;
-
-      // Get current network conditions
-      const feeData = await provider.getFeeData();
-
-      // Estimate gas for the transfer
-      const gasEstimate = await provider.estimateGas({
-        from: this.wallet.address,
-        to: destinationAddress,
-        value: balance,
-      });
-
-      // Calculate gas cost with a 20% buffer
-      const gasBuffer = (gasEstimate * 200n) / 100n;
-      const gasCost = gasBuffer * (feeData.gasPrice ?? 0n);
-
-      // Calculate amount to send (total balance minus gas cost)
-      const amountToSend = balance - gasCost;
-
-      if (amountToSend <= 0n) {
-        throw new Error("Insufficient funds to cover gas costs");
-      }
-
-      // Send the transaction
-      const tx = await this.wallet.sendTransaction({
-        to: destinationAddress,
-        value: amountToSend,
-        gasLimit: gasBuffer,
-        maxFeePerGas: feeData.maxFeePerGas,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
-      });
-
-      await tx.wait();
-
-      console.log("Transfer successful:", {
-        from: this.wallet.address,
-        to: destinationAddress,
-        amount: ethers.formatEther(amountToSend),
-        gasLimit: gasBuffer.toString(),
-        txHash: tx.hash,
-      });
-
-      return tx.hash;
-    } catch (error) {
-      console.error("Transfer failed:", error);
-      throw error;
-    }
   }
 }
 

@@ -21,13 +21,14 @@ class ProviderService {
     try {
       const network = await provider.getNetwork();
       console.log("Provider validated successfully:", {
-        chainId: network.chainId,
+        chainId: network.chainId.toString(),
         name: network.name,
         timestamp: new Date().toISOString()
       });
       return true;
     } catch (error) {
-      console.warn("Provider validation failed:", error);
+      const formattedError = (await import("@/lib/formatError")).formatContractError(error);
+      console.warn("Provider validation failed:", formattedError);
       return false;
     }
   }

@@ -1,26 +1,7 @@
 import { createClient } from "urql";
 import { cacheExchange, fetchExchange } from "@urql/core";
 import { SUBGRAPH_URLS } from "@/lib/constants";
-
-interface Token {
-  id: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  totalSupply: string;
-  volume: string;
-  volumeUSD: string;
-  feesUSD: string;
-  txCount: string;
-  poolCount: string;
-  totalValueLocked: string;
-  totalValueLockedUSD: string;
-  derivedETH: string;
-}
-
-interface TokensResponse {
-  tokens: Token[];
-}
+import { Token, TokensResponse, Swap, Pool } from "@/types/uniswap";
 
 class UniswapService {
   private client;
@@ -71,14 +52,19 @@ class UniswapService {
     if (error) throw new Error(`Failed to fetch tokens: ${error.message}`);
     if (!data?.tokens) return [];
 
-    return data.tokens.filter(
-      (token) =>
-        token.id &&
-        token.symbol &&
-        token.decimals &&
-        Number(token.totalValueLockedUSD) > 100000 &&
-        Number(token.volumeUSD) > 10000
-    );
+    return data.tokens
+      .filter(
+        (token) =>
+          token.id &&
+          token.symbol &&
+          token.decimals &&
+          Number(token.totalValueLockedUSD) > 100000 &&
+          Number(token.volumeUSD) > 10000
+      )
+      .map(token => ({
+        ...token,
+        address: token.id, // Add address alias for compatibility
+      }));
   }
 
   async getPoolData() {
@@ -119,7 +105,7 @@ class UniswapService {
     }
   }
 
-  async getRecentSwaps(limit: number = 10) {
+  async getRecentSwaps(limit: number = 10): Promise<Swap[]> {
     const query = `
       query {
         swaps(
@@ -128,6 +114,7 @@ class UniswapService {
           orderDirection: desc,
           where: { amountUSD_gt: "10000" }
         ) {
+          id
           timestamp
           token0 {
             symbol
@@ -138,6 +125,14 @@ class UniswapService {
           amount0
           amount1
           amountUSD
+          pool {
+            token0 {
+              symbol
+            }
+            token1 {
+              symbol
+            }
+          }
         }
       }
     `;

@@ -1,11 +1,12 @@
 import { ethers } from "ethers";
-import { ERC20_ABI } from "@/lib/constants";
+import { ERC20_ABI, DEFAULT_GAS_LIMITS, MIN_REQUIRED_ETH } from "@/lib/constants";
 import { UNISWAP_DEPLOYMENTS, WRAPPED_NATIVE_TOKEN } from "@/lib/uniswapDeployments";
 import { redis } from "./redis";
 import { getTokenDetails } from "@/lib/tokenHelpers";
 import { providerService } from "./provider";
 import { uniswapMultihopService } from "./uniswapMultihopService";
 import { agentKit } from "./agentkit";
+import { SWAP_ROUTER_ABI } from "@/lib/uniswapABI";
 
 interface UniswapTradeParams {
   userId: string;
@@ -23,6 +24,21 @@ class UniswapTradeService {
       factory: UNISWAP_DEPLOYMENTS[chain].UniswapV3Factory,
       weth: WRAPPED_NATIVE_TOKEN[chain].address.toLowerCase(),
     };
+  }
+
+  private async checkSufficientGasFunds(signer: ethers.Signer): Promise<void> {
+    const provider = await providerService.getProvider();
+    const address = await signer.getAddress();
+    const balance = await provider.getBalance(address);
+    const minRequired = ethers.parseEther(MIN_REQUIRED_ETH);
+
+    if (balance < minRequired) {
+      throw new Error(
+        `Insufficient ETH for gas fees. Required: ${MIN_REQUIRED_ETH} ETH, Current balance: ${ethers.formatEther(
+          balance
+        )} ETH`
+      );
+    }
   }
 
   async executeTrade(params: UniswapTradeParams) {
@@ -87,19 +103,46 @@ class UniswapTradeService {
         const signer = agentKit.getSigner();
         const signerAddress = await signer.getAddress();
 
-        // Check and approve token spending
+        // Check for sufficient gas funds before proceeding
+        await this.checkSufficientGasFunds(signer);
+
+        // Check and approve token spending using proper ethers v6 contract calls
         console.log("Checking token allowance...");
         const parsedAmount = ethers.parseUnits(amount, decimals);
-        const currentAllowance = await tokenContract.allowance(signerAddress, addresses.router);
+        
+        // Use safe allowance check that handles failures gracefully
+        const { safeAllowanceCheck } = await import("@/lib/safeTokenHelpers");
+        const currentAllowance = await safeAllowanceCheck(tokenContract, signerAddress, addresses.router);
         
         if (currentAllowance < parsedAmount) {
           console.log("Insufficient allowance, requesting approval...");
           const tokenWithSigner = tokenContract.connect(signer);
-          const approveTx = await tokenWithSigner.approve(addresses.router, parsedAmount);
-          console.log("Approval transaction sent:", approveTx.hash);
           
-          const approveReceipt = await approveTx.wait();
-          console.log("Approval confirmed:", approveReceipt.hash);
+          try {
+            // Get current gas price for approval
+            const feeData = await provider.getFeeData();
+            const gasPrice = feeData.gasPrice || ethers.parseUnits("0.1", "gwei");
+            
+            const approveTx = await tokenWithSigner.approve(
+              addresses.router,
+              parsedAmount,
+              {
+                gasLimit: DEFAULT_GAS_LIMITS.TOKEN_TRANSFER,
+                gasPrice
+              }
+            );
+            console.log("Approval transaction sent:", approveTx.hash);
+            
+            const approveReceipt = await approveTx.wait();
+            console.log("Approval confirmed:", approveReceipt.hash);
+          } catch (approvalError) {
+            console.error("Token approval failed:", approvalError);
+            throw new Error(
+              `Failed to approve token spending: ${
+                approvalError instanceof Error ? approvalError.message : "Unknown error"
+              }`
+            );
+          }
         } else {
           console.log("Sufficient allowance exists");
         }
@@ -141,21 +184,34 @@ class UniswapTradeService {
         } else {
           console.log("Executing single-hop trade");
           const minOutput = parsedAmount - (parsedAmount * BigInt(Math.floor(maxSlippage * 100))) / BigInt(10000);
+          const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes
 
           const swapParams = {
             tokenIn: addresses.weth,
             tokenOut: normalizedTokenAddress,
             fee: 3000, // 0.3% fee tier
-            recipient: userId,
+            recipient: signerAddress,
+            deadline,
             amountIn: parsedAmount,
             amountOutMinimum: minOutput,
-            sqrtPriceLimitX96: 0,
+            sqrtPriceLimitX96: 0n
           };
 
-          console.log("Swap parameters:", swapParams);
+          console.log("Swap parameters:", {
+            ...swapParams,
+            amountIn: ethers.formatUnits(swapParams.amountIn, decimals),
+            amountOutMinimum: ethers.formatUnits(swapParams.amountOutMinimum, decimals)
+          });
 
-          // Execute the swap using the agent kit signer
-          const tx = await signer.sendTransaction(swapParams);
+          // Create router contract instance
+          const router = new ethers.Contract(
+            addresses.router,
+            SWAP_ROUTER_ABI,
+            signer
+          );
+
+          // Execute the swap using the router contract
+          const tx = await router.exactInputSingle(swapParams);
           console.log("Transaction sent:", tx.hash);
           
           const receipt = await tx.wait();
@@ -185,10 +241,9 @@ class UniswapTradeService {
         }
       } catch (contractError) {
         console.error("Token contract interaction failed:", contractError);
+        const formattedError = (await import("@/lib/formatError")).formatContractError(contractError);
         throw new Error(
-          `Failed to interact with token contract at ${normalizedTokenAddress}: ${
-            contractError instanceof Error ? contractError.message : "Unknown error"
-          }`
+          `Failed to interact with token contract at ${normalizedTokenAddress}: ${formattedError}`
         );
       }
     } catch (error) {
