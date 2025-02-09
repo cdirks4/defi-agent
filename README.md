@@ -4,7 +4,15 @@ This is a [Next.js](https://nextjs.org) project that implements a DeFi trading a
 
 ## Getting Started
 
-First, run the development server:
+First, set up your environment variables in `.env`:
+
+```bash
+# Required environment variables
+LLAMA_API_ENDPOINT=""  # Your Llama API endpoint
+LLAMA_API_KEY=""       # Your Llama API key
+```
+
+Then run the development server:
 
 ```bash
 npm run dev
@@ -19,6 +27,14 @@ bun dev
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 ## Features
+
+### AI-Powered Trading Analysis
+
+The application uses the Llama API for:
+- Real-time market analysis
+- Trading decision support
+- Pattern recognition in historical data
+- Market sentiment analysis
 
 ### Uniswap V3 Integration
 
@@ -55,6 +71,7 @@ The project uses:
 - Redis for caching trade data
 - Ethers.js for blockchain interaction
 - Uniswap V3 SDK for trading functionality
+- Llama API for AI-powered trading analysis
 
 ## Development
 

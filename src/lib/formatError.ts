@@ -13,13 +13,28 @@ interface ContractError extends Error {
   errorArgs?: any[];
 }
 
-export function formatContractError(error: unknown): string {
+import { logger } from "./logger";
+
+export function formatContractError(error: unknown, context: { [key: string]: any } = {}): string {
   if (!(error instanceof Error)) {
+    logger.warn('Non-Error object passed to formatContractError', {
+      module: 'error',
+      method: 'formatContractError',
+      errorType: typeof error,
+      context
+    });
     return "Unknown error occurred";
   }
 
   const contractError = error as ContractError;
   let errorMessage = contractError.message;
+
+  logger.debug('Formatting contract error', {
+    module: 'error',
+    method: 'formatContractError',
+    errorMessage,
+    context
+  });
 
   // Build detailed error message
   const details: string[] = [];
@@ -56,13 +71,51 @@ export function formatContractError(error: unknown): string {
   return errorMessage;
 }
 
-export function formatGasEstimationError(error: unknown, tokenAddress: string): string {
+export function formatGasEstimationError(error: unknown, tokenAddress: string, context: { [key: string]: any } = {}): string {
   const baseMessage = `Failed to estimate gas for token ${tokenAddress}`;
   
+  logger.error('Gas estimation failed', {
+    module: 'error',
+    method: 'formatGasEstimationError',
+    tokenAddress,
+    ...context
+  }, error instanceof Error ? error : new Error('Unknown error'));
+
   if (!(error instanceof Error)) {
     return `${baseMessage}: Unknown error`;
   }
 
-  const formattedError = formatContractError(error);
+  const formattedError = formatContractError(error, {
+    tokenAddress,
+    ...context
+  });
   return `${baseMessage}: ${formattedError}`;
+}
+
+// Helper function for simulation-specific errors
+export function formatSimulationError(error: unknown, context: { [key: string]: any } = {}): string {
+  logger.error('Simulation error occurred', {
+    module: 'error',
+    method: 'formatSimulationError',
+    ...context
+  }, error instanceof Error ? error : new Error('Unknown error'));
+
+  if (!(error instanceof Error)) {
+    return "Unknown simulation error occurred";
+  }
+
+  // Check for specific simulation error types
+  if (error.message.includes('No historical trades found')) {
+    return `No trading data available: ${error.message}`;
+  }
+
+  if (error.message.includes('LLAMA_API')) {
+    return `AI service error: ${error.message}`;
+  }
+
+  if (error.message.includes('rate limit')) {
+    return `Service temporarily unavailable: ${error.message}`;
+  }
+
+  return error.message;
 }

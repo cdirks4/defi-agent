@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
-import Image from "next/image";
 import Vapi from "@vapi-ai/web";
 import ActiveCallDetail from "@/components/ActiveCallDetail";
 import Button from "@/components/base/Button";

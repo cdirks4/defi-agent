@@ -1,6 +1,12 @@
 import { useQuery } from "urql";
 import { useMemo } from "react";
-import { Pool, PoolsResponse, SwapsResponse, TokensResponse } from "@/types/uniswap";
+import {
+  Pool,
+  PoolsResponse,
+  SwapsResponse,
+  TokensResponse,
+} from "@/types/uniswap";
+import { inMemoryCache } from "@/lib/inMemoryCache";
 
 const TOP_POOLS_QUERY = `
   query GetTopPools {
@@ -68,12 +74,12 @@ const POOL_DATA_QUERY = `
 `;
 
 const RECENT_SWAPS_QUERY = `
-  query GetRecentSwaps($poolAddress: ID!, $limit: Int!) {
+  query GetRecentSwaps($poolAddress: ID!) {
     swaps(
       where: { pool: $poolAddress }
       orderBy: timestamp
       orderDirection: desc
-      first: $limit
+      first: 50
     ) {
       id
       timestamp
@@ -117,19 +123,34 @@ const VALID_TOKENS_QUERY = `
 export function useTopPools() {
   const [result] = useQuery<PoolsResponse>({
     query: TOP_POOLS_QUERY,
-    context: useMemo(() => ({
-      requestPolicy: 'network-only'
-    }), [])
+    context: useMemo(
+      () => ({
+        requestPolicy: "cache-and-network",
+      }),
+      []
+    ),
   });
 
-  const filteredPools = useMemo(() => 
-    result.data?.pools?.filter((pool): pool is Pool => 
-      Boolean(pool?.token0?.decimals && 
-      pool?.token1?.decimals && 
-      Number(pool.totalValueLockedUSD) > 0)
-    ),
-    [result.data?.pools]
-  );
+  const filteredPools = useMemo(() => {
+    const cacheKey = "top_pools_filtered";
+    const cached = inMemoryCache.get<Pool[]>(cacheKey);
+    if (cached) return cached;
+
+    const filtered =
+      result.data?.pools?.filter((pool): pool is Pool =>
+        Boolean(
+          pool?.token0?.decimals &&
+            pool?.token1?.decimals &&
+            Number(pool.totalValueLockedUSD) > 0
+        )
+      ) || [];
+
+    if (filtered.length > 0) {
+      inMemoryCache.set(cacheKey, filtered, 30000); // 30 second cache
+    }
+
+    return filtered;
+  }, [result.data?.pools]);
 
   return {
     pools: filteredPools,
@@ -139,46 +160,89 @@ export function useTopPools() {
 }
 
 export function usePoolData(poolAddress: string) {
-  const [result] = useQuery<{ pool: Pool }>({
-    query: POOL_DATA_QUERY,
-    variables: useMemo(() => ({ poolAddress }), [poolAddress]),
-    pause: !poolAddress,
-    context: useMemo(() => ({
-      requestPolicy: 'cache-and-network'
-    }), [])
-  });
-
-  const validPool = useMemo(() => 
-    result.data?.pool && 
-    result.data.pool.token0?.decimals && 
-    result.data.pool.token1?.decimals,
-    [result.data?.pool]
+  const variables = useMemo(
+    () => ({ poolAddress: poolAddress || "" }),
+    [poolAddress]
+  );
+  const context = useMemo(
+    () => ({
+      requestPolicy: "cache-and-network" as const,
+    }),
+    []
   );
 
+  const [result] = useQuery<{ pool: Pool }>({
+    query: POOL_DATA_QUERY,
+    variables,
+    context,
+    pause: !poolAddress,
+  });
+
+  const validPool = useMemo(() => {
+    if (!poolAddress) return null;
+
+    const cacheKey = `pool_data:${poolAddress}`;
+    const cached = inMemoryCache.get<Pool | null>(cacheKey);
+    if (cached !== null) return cached;
+
+    const valid =
+      result.data?.pool &&
+      result.data.pool.token0?.decimals &&
+      result.data.pool.token1?.decimals
+        ? result.data.pool
+        : null;
+
+    if (valid) {
+      inMemoryCache.set(cacheKey, valid, 30000); // 30 second cache
+    }
+
+    return valid;
+  }, [result.data?.pool, poolAddress]);
+
   return {
-    data: validPool ? result.data.pool : null,
+    data: validPool,
     loading: result.fetching,
     error: result.error,
   };
 }
 
-export function useRecentSwaps(poolAddress: string, limit: number = 10) {
+export function useRecentSwaps(poolAddress: string) {
+  const variables = useMemo(
+    () => ({ poolAddress: poolAddress || "" }),
+    [poolAddress]
+  );
+  const context = useMemo(
+    () => ({
+      requestPolicy: "network-only" as const,
+    }),
+    []
+  );
+
   const [result] = useQuery<SwapsResponse>({
     query: RECENT_SWAPS_QUERY,
-    variables: useMemo(() => ({ poolAddress, limit }), [poolAddress, limit]),
+    variables,
+    context,
     pause: !poolAddress,
-    context: useMemo(() => ({
-      requestPolicy: 'network-only'
-    }), [])
   });
 
-  const filteredSwaps = useMemo(() => 
-    result.data?.swaps?.filter(swap => 
-      swap?.pool?.token0?.symbol && 
-      swap?.pool?.token1?.symbol
-    ),
-    [result.data?.swaps]
-  );
+  const filteredSwaps = useMemo(() => {
+    if (!poolAddress) return [];
+
+    const cacheKey = `recent_swaps:${poolAddress}`;
+    const cached = inMemoryCache.get<SwapsResponse["swaps"]>(cacheKey);
+    if (cached) return cached;
+
+    const filtered =
+      result.data?.swaps?.filter(
+        (swap) => swap?.pool?.token0?.symbol && swap?.pool?.token1?.symbol
+      ) || [];
+
+    if (filtered.length > 0) {
+      inMemoryCache.set(cacheKey, filtered, 15000); // 15 second cache for recent swaps
+    }
+
+    return filtered;
+  }, [result.data?.swaps, poolAddress]);
 
   return {
     swaps: filteredSwaps,
@@ -190,18 +254,30 @@ export function useRecentSwaps(poolAddress: string, limit: number = 10) {
 export function useValidTokens() {
   const [result] = useQuery<TokensResponse>({
     query: VALID_TOKENS_QUERY,
-    context: useMemo(() => ({
-      requestPolicy: 'cache-and-network'
-    }), [])
+    context: useMemo(
+      () => ({
+        requestPolicy: "cache-and-network",
+      }),
+      []
+    ),
   });
 
-  const filteredTokens = useMemo(() => 
-    result.data?.tokens?.filter(token => 
-      token?.decimals && 
-      Number(token.totalValueLockedUSD) > 0
-    ),
-    [result.data?.tokens]
-  );
+  const filteredTokens = useMemo(() => {
+    const cacheKey = "valid_tokens_filtered";
+    const cached = inMemoryCache.get<TokensResponse["tokens"]>(cacheKey);
+    if (cached) return cached;
+
+    const filtered =
+      result.data?.tokens?.filter(
+        (token) => token?.decimals && Number(token.totalValueLockedUSD) > 0
+      ) || [];
+
+    if (filtered.length > 0) {
+      inMemoryCache.set(cacheKey, filtered, 30000); // 30 second cache
+    }
+
+    return filtered;
+  }, [result.data?.tokens]);
 
   return {
     tokens: filteredTokens,

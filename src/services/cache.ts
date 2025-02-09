@@ -1,4 +1,5 @@
 import { redis } from './redis'
+import { SimulationResult, SimulationTrade } from '@/types/simulation'
 
 export class CacheService {
   private readonly TTL = 3600 // 1 hour in seconds
@@ -8,7 +9,8 @@ export class CacheService {
     USER_INTERACTIONS: 'idx:interactions',
     EMBEDDINGS: 'idx:embeddings',
     TRADE_HISTORY: 'idx:trades',
-    ACTIVE_SESSIONS: 'idx:sessions'
+    ACTIVE_SESSIONS: 'idx:sessions',
+    SIMULATIONS: 'idx:simulations'
   }
 
   async cacheUserInteraction(interaction: any) {
@@ -42,6 +44,70 @@ export class CacheService {
     return Promise.all(
       keys.map(key => this.getCachedInteraction(key as string))
     )
+  }
+
+  async cacheSimulationResult(userId: string, result: SimulationResult) {
+    const simulationId = `simulation:${Date.now()}`
+    await Promise.all([
+      // Store the simulation result
+      redis.set(simulationId, JSON.stringify(result), {
+        ex: this.TTL
+      }),
+      // Add to user's simulation index
+      redis.zadd(
+        `${this.INDICES.SIMULATIONS}:${userId}`,
+        { score: Date.now(), member: simulationId }
+      )
+    ])
+    return simulationId
+  }
+
+  async getSimulationHistory(userId: string, limit = 5) {
+    const keys = await redis.zrange(
+      `${this.INDICES.SIMULATIONS}:${userId}`,
+      0,
+      limit - 1,
+      { rev: true }
+    )
+    
+    const results = await Promise.all(
+      keys.map(async key => {
+        const cached = await redis.get(key as string)
+        return cached ? JSON.parse(cached as string) as SimulationResult : null
+      })
+    )
+    
+    return results.filter(Boolean)
+  }
+
+  async cacheSimulatedTrade(trade: SimulationTrade, context: any) {
+    try {
+      const tradeId = `simtrade:${Date.now()}`;
+      const timestamp = this.parseTimestamp(trade.timestamp);
+      
+      if (isNaN(timestamp)) {
+        console.error('Invalid timestamp for trade:', trade);
+        return null;
+      }
+
+      await Promise.all([
+        redis.set(tradeId, JSON.stringify({
+          trade,
+          context
+        }), {
+          ex: this.TTL
+        }),
+        redis.zadd(
+          `${this.INDICES.TRADE_HISTORY}:simulation`,
+          { score: timestamp, member: tradeId }
+        )
+      ]);
+      
+      return tradeId;
+    } catch (error) {
+      console.error('Failed to cache simulated trade:', error);
+      return null;
+    }
   }
 
   async cacheEmbedding(embedding: number[], metadata: any) {
@@ -84,13 +150,36 @@ export class CacheService {
       0,
       -1
     )
+    const simulationKeys = await redis.zrange(
+      `${this.INDICES.SIMULATIONS}:${userId}`,
+      0,
+      -1
+    )
     
     return Promise.all([
       ...interactionKeys.map(key => redis.del(key as string)),
       ...embeddingKeys.map(key => redis.del(key as string)),
+      ...simulationKeys.map(key => redis.del(key as string)),
       redis.del(`${this.INDICES.USER_INTERACTIONS}:${userId}`),
-      redis.del(`${this.INDICES.EMBEDDINGS}:${userId}`)
+      redis.del(`${this.INDICES.EMBEDDINGS}:${userId}`),
+      redis.del(`${this.INDICES.SIMULATIONS}:${userId}`)
     ])
+  }
+
+  private parseTimestamp(timestamp: string): number {
+    // Try parsing as ISO string first
+    const date = new Date(timestamp)
+    if (!isNaN(date.getTime())) {
+      return date.getTime()
+    }
+
+    // Try parsing as Unix timestamp
+    const unixTimestamp = parseInt(timestamp)
+    if (!isNaN(unixTimestamp)) {
+      return unixTimestamp
+    }
+
+    return NaN
   }
 }
 

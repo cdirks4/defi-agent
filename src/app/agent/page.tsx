@@ -9,6 +9,7 @@ import TransferFunds from "@/components/TransferFunds";
 import FundAgentWallet from "@/components/FundAgentWallet";
 import { storageService } from "@/services/storage";
 import Spinner from "@/components/base/Spinner";
+import VAPIAssistant from "@/components/VAPIAssistant";
 
 export default function AgentPage() {
   const { authenticated, user } = usePrivy();
@@ -134,17 +135,24 @@ export default function AgentPage() {
 
         <WalletOverview />
 
-        {agentWalletAddress && wallets?.[0]?.address && (
-          <div className="space-y-8">
-            <FundAgentWallet
+        {agentWalletAddress && wallets?.[0]?.address && user?.id && (
+          <>
+            <VAPIAssistant
               userWalletAddress={wallets[0].address}
               agentWalletAddress={agentWalletAddress}
+              userId={user.id}
             />
-            <TransferFunds
-              userWalletAddress={wallets[0].address}
-              agentWalletAddress={agentWalletAddress}
-            />
-          </div>
+            <div className="space-y-8">
+              <FundAgentWallet
+                userWalletAddress={wallets[0].address}
+                agentWalletAddress={agentWalletAddress}
+              />
+              <TransferFunds
+                userWalletAddress={wallets[0].address}
+                agentWalletAddress={agentWalletAddress}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>

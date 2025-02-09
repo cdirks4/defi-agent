@@ -22,7 +22,7 @@ const MarketOverview = () => {
     if (pools && pools.length > 0 && !selectedPool) {
       setSelectedPool(pools[0].id);
     }
-  }, [pools]);
+  }, [pools, selectedPool]);
 
   useEffect(() => {
     const fetchMarketData = async () => {
@@ -73,55 +73,48 @@ const MarketOverview = () => {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card">
           <h3 className="text-lg font-medium mb-2">TVL</h3>
           <p className="text-2xl">
             ${Number(poolData?.totalValueLockedUSD).toLocaleString()}
           </p>
+          <p className="text-sm text-muted-foreground">
+            {poolData?.liquidityProviderCount} LPs
+          </p>
         </div>
         <div className="card">
-          <h3 className="text-lg font-medium mb-2">Volume</h3>
+          <h3 className="text-lg font-medium mb-2">Volume (24h)</h3>
           <p className="text-2xl">
             ${Number(poolData?.volumeUSD).toLocaleString()}
           </p>
+          <div className="flex justify-between text-sm text-muted-foreground">
+            <span>
+              {Number(poolData?.volumeToken0).toFixed(2)}{" "}
+              {poolData?.token0.symbol}
+            </span>
+            <span>
+              {Number(poolData?.volumeToken1).toFixed(2)}{" "}
+              {poolData?.token1.symbol}
+            </span>
+          </div>
         </div>
         <div className="card">
-          <h3 className="text-lg font-medium mb-2">Fee Tier</h3>
+          <h3 className="text-lg font-medium mb-2">Fees (24h)</h3>
           <p className="text-2xl">
-            {(Number(poolData?.feeTier) / 10000).toFixed(2)}%
+            ${Number(poolData?.feesUSD).toLocaleString()}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Total: ${Number(poolData?.collectedFeesUSD).toLocaleString()}
           </p>
         </div>
-      </div>
-
-      <div>
-        <h2 className="text-xl font-semibold mb-6">Market Overview</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {markets.map((market) => (
-            <div
-              key={market.symbol}
-              className="bg-gray-700 rounded-lg p-4 hover:bg-gray-600 transition-colors"
-            >
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-lg font-medium">{market.symbol}</span>
-                <div
-                  className={`flex items-center space-x-1 ${
-                    market.change24h >= 0 ? "text-green-400" : "text-red-400"
-                  }`}
-                >
-                  {market.change24h >= 0 ? (
-                    <TrendingUp className="w-4 h-4" />
-                  ) : (
-                    <TrendingDown className="w-4 h-4" />
-                  )}
-                  <span>{Math.abs(market.change24h).toFixed(2)}%</span>
-                </div>
-              </div>
-              <div className="text-2xl font-bold">
-                ${market.price.toLocaleString()}
-              </div>
-            </div>
-          ))}
+        <div className="card">
+          <h3 className="text-lg font-medium mb-2">Price</h3>
+          <p className="text-2xl">{Number(poolData?.token0Price).toFixed(6)}</p>
+          <p className="text-sm text-muted-foreground">
+            1 {poolData?.token0.symbol} ={" "}
+            {Number(poolData?.token1Price).toFixed(6)} {poolData?.token1.symbol}
+          </p>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 export const SUBGRAPH_URLS = {
   arbitrum:
-    "https://gateway.thegraph.com/api/1055d3690bf5a07d168419b363ea550d/subgraphs/id/id/FQ6JYszEKApsBpAmiHesRsd9Ygc6mzmpNRANeVQFYoVX",
+    "https://gateway.thegraph.com/api/1055d3690bf5a07d168419b363ea550d/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
   "arbitrum-sepolia":
     "https://gateway.thegraph.com/api/1055d3690bf5a07d168419b363ea550d/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
 } as const;
@@ -69,7 +69,6 @@ export const TOKEN_ADDRESSES = {
   },
   "mainnet-to-testnet": {
     // Mainnet to testnet address mapping
-    // ?? Ideally i figure out why main-net addreses are showing up probably need to check graph
     "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48":
       "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", // USDC
     "0x82af49447d8a07e3bd95bd0d56f35241523fbab1":
@@ -80,6 +79,11 @@ export const TOKEN_ADDRESSES = {
       "0x1a35ee4640b0a8b14a16492307f2c4e1a0b04c7c", // WBTC
     "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984":
       "0x1Cf56194E2C267E11515d45314E1Bf1D8E5DC0eD", // UNI
+    // Add the specific address from the error
+    "0x980b62da83eff3d4576c647993b0c1d7faf17c73":
+      "0x980b62da83eff3d4576c647993b0c1d7faf17c73", // WETH on Arbitrum Sepolia
+    "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d":
+      "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", // USDC on Arbitrum Sepolia
   },
 } as const;
 

@@ -1,4 +1,6 @@
 import { PrismaClient } from "@prisma/client";
+import { SimulationResult } from "@/types/simulation";
+import { logger } from "@/lib/logger";
 
 class DatabaseService {
   private prisma: PrismaClient;
@@ -51,39 +53,89 @@ class DatabaseService {
     });
   }
 
-  async storeEmbedding(data: {
-    vector: number[];
-    content: string;
-    metadata?: any;
+  async storeSimulationResult(data: {
+    userId: string;
+    startDate: Date;
+    endDate: Date;
+    token0: string;
+    token1: string;
+    result: SimulationResult;
   }) {
-    return this.prisma.embedding.create({
-      data: {
-        vector: `[${data.vector.join(",")}]`,
-        content: data.content,
-        metadata: data.metadata || {},
-      },
+    const context = {
+      module: 'database',
+      method: 'storeSimulationResult',
+      userId: data.userId,
+      token0: data.token0,
+      token1: data.token1,
+      startDate: data.startDate.toISOString(),
+      endDate: data.endDate.toISOString()
+    };
+
+    try {
+      logger.info('Storing simulation result', context);
+
+      const result = await this.prisma.simulationHistory.create({
+        data: {
+          userId: data.userId,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          token0: data.token0,
+          token1: data.token1,
+          trades: data.result.trades,
+          metrics: data.result.metrics,
+          marketContext: data.result.marketContext,
+        },
+      });
+
+      logger.info('Successfully stored simulation result', {
+        ...context,
+        resultId: result.id
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Failed to store simulation result', context, error as Error);
+      throw error;
+    }
+  }
+
+  async getSimulationHistory(userId: string, limit = 10) {
+    return this.prisma.simulationHistory.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
     });
   }
 
-  async findSimilarEmbeddings(vector: number[], limit = 5) {
-    return this.prisma.$queryRaw`
-      SELECT id, content, metadata,
-             1 - (vector <=> ${vector}::vector) as similarity
-      FROM "embeddings"
-      ORDER BY similarity DESC
-      LIMIT ${limit}
-    `;
+  async storeEmbedding(data: {
+    vector: number[];
+    content: string;
+    metadata: any;
+  }) {
+    try {
+      const vectorString = JSON.stringify(data.vector);
+  
+      return this.prisma.simulationResult.create({
+        data: {
+          userId: 'simulation', // Add default userId
+          vector: vectorString,
+          content: data.content,
+          metadata: data.metadata,
+          createdAt: new Date(),
+          startDate: new Date(data.metadata.period.start), // Add required fields
+          endDate: new Date(data.metadata.period.end),
+          token0: data.metadata.tokenPair.token0,
+          token1: data.metadata.tokenPair.token1,
+          result: {}, // Add empty result object
+        },
+      });
+    } catch (error) {
+      console.error("Failed to store embedding:", error);
+      return null;
+    }
   }
 
-  async findSimilarInteractions(embedding: number[], limit = 5) {
-    return this.prisma.$queryRaw`
-      SELECT id, message, response, metadata,
-             1 - (embedding <=> ${embedding}::vector) as similarity
-      FROM "UserInteraction"
-      ORDER BY similarity DESC
-      LIMIT ${limit}
-    `;
-  }
+  // Additional database helper methods can be added here
 }
 
 export const dbService = new DatabaseService();

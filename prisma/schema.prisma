@@ -37,6 +37,21 @@ model TradeHistory {
   @@index([userId])
 }
 
+model SimulationHistory {
+  id            String   @id @default(cuid())
+  userId        String
+  startDate     DateTime
+  endDate       DateTime
+  token0        String
+  token1        String
+  trades        Json     // Store simulated trades
+  metrics       Json     // Store simulation metrics
+  marketContext Json     // Store market analysis
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
 model Embedding {
   id          Int      @id @default(autoincrement())
   vector      Unsupported("vector(1536)")
@@ -53,4 +68,18 @@ model Item {
   binary_embedding  String?                 @db.Bit(3)
 
   @@map("prisma_items")
+}
+
+model SimulationResult {
+  id        String   @id @default(cuid())
+  userId    String
+  startDate DateTime
+  endDate   DateTime
+  token0    String
+  token1    String
+  result    Json
+  vector    String?  // For storing embeddings
+  content   String?  // For storing raw data
+  metadata  Json?    // For storing additional metadata
+  createdAt DateTime @default(now())
 }

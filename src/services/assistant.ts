@@ -7,8 +7,8 @@ export class AssistantService {
 
   constructor() {
     this.llama = new LlamaService({
-      endpoint: process.env.GROQ_ENDPOINT!,
-      apiKey: process.env.GROQ_API_KEY,
+      endpoint: process.env.LLAMA_API_ENDPOINT!,
+      apiKey: process.env.LLAMA_API_KEY,
     });
   }
 
@@ -43,6 +43,4 @@ export class AssistantService {
 
     return stream;
   }
-
-  // ... rest of the class
 }

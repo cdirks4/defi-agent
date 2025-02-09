@@ -34,13 +34,13 @@ export class AgentKitService {
     console.debug("Ensuring wallet connection:", {
       userId,
       createIfNotExist,
-      currentWalletStatus: this.wallet ? 'connected' : 'not connected'
+      currentWalletStatus: this.wallet ? "connected" : "not connected",
     });
 
     if (!this.wallet) {
       console.debug("No active wallet connection, attempting to connect...", {
         userId,
-        createIfNotExist
+        createIfNotExist,
       });
       const connected = await this.connectWallet(userId, createIfNotExist);
       if (!connected) {
@@ -54,7 +54,7 @@ export class AgentKitService {
 
     console.debug("Wallet connection ensured:", {
       address: this.wallet?.address,
-      userId
+      userId,
     });
     return this.wallet;
   }
@@ -93,7 +93,7 @@ export class AgentKitService {
         console.debug("Wallet already connected:", {
           address: this.wallet.address,
           network: await this.provider?.getNetwork().then((n) => n.name),
-          userId
+          userId,
         });
         return true;
       }
@@ -101,7 +101,7 @@ export class AgentKitService {
       console.debug("Starting wallet connection process:", {
         userId,
         createIfNotExist,
-        storedWallets: await storageService.debugPrintWallets()
+        storedWallets: await storageService.debugPrintWallets(),
       });
 
       // Check for existing wallet in storage
@@ -114,13 +114,13 @@ export class AgentKitService {
             address: existingWallet.address,
             userId: existingWallet.userId,
             lastAccessed: existingWallet.lastAccessed,
-            createdAt: existingWallet.createdAt
+            createdAt: existingWallet.createdAt,
           });
 
           const privateKey = await this.decryptPrivateKey(
             existingWallet.encryptedPrivateKey
           );
-          
+
           // Verify the decrypted private key format
           if (!privateKey.match(/^0x[0-9a-fA-F]{64}$/)) {
             console.debug("Invalid private key format after decryption");
@@ -131,23 +131,26 @@ export class AgentKitService {
           console.debug("Successfully restored existing agent wallet:", {
             address: this.wallet.address,
             network: await provider.getNetwork().then((n) => n.name),
-            userId
+            userId,
           });
-          
+
           storageService.updateLastAccessed(this.wallet.address);
           return true;
         } catch (error) {
           console.debug("Failed to restore existing wallet:", {
             error,
             userId,
-            walletAddress: existingWallet.address
+            walletAddress: existingWallet.address,
           });
           if (!createIfNotExist) {
             return false;
           }
         }
       } else {
-        console.debug("No existing wallet found in storage for userId:", userId);
+        console.debug(
+          "No existing wallet found in storage for userId:",
+          userId
+        );
         if (!createIfNotExist) {
           return false;
         }
@@ -163,7 +166,7 @@ export class AgentKitService {
           newWallet.privateKey,
           userId
         );
-        
+
         const walletData = {
           address: newWallet.address,
           encryptedPrivateKey: encryptedKey,
@@ -171,14 +174,14 @@ export class AgentKitService {
           createdAt: new Date().toISOString(),
           lastAccessed: new Date().toISOString(),
         };
-        
+
         storageService.storeWallet(walletData);
 
         console.debug("New agent wallet created and stored:", {
           address: this.wallet.address,
           network: await provider.getNetwork().then((n) => n.name),
           userId: userId,
-          createdAt: walletData.createdAt
+          createdAt: walletData.createdAt,
         });
         return true;
       }
@@ -203,11 +206,11 @@ export class AgentKitService {
       // Note: This is a simple example. In production, use a proper encryption service
       const decoded = atob(encryptedKey);
       const [privateKey, userId] = decoded.split(":");
-      
+
       if (!privateKey || !userId) {
         throw new Error("Invalid encrypted key format");
       }
-      
+
       return privateKey;
     } catch (error) {
       console.error("Failed to decrypt private key:", error);
@@ -215,26 +218,53 @@ export class AgentKitService {
     }
   }
 
-  async initializeFromData(walletData: {
-    address: string;
-    encryptedPrivateKey: string;
-    userId: string;
-  }) {
+  async checkWalletHealth(tokenAddress?: string): Promise<WalletHealth> {
     try {
-      const provider = await this.ensureProvider();
-      const privateKey = await this.decryptPrivateKey(walletData.encryptedPrivateKey);
-      this.wallet = new ethers.Wallet(privateKey, provider);
-      
-      if (this.wallet.address.toLowerCase() !== walletData.address.toLowerCase()) {
-        throw new Error("Wallet address mismatch");
+      if (!this.wallet) {
+        return {
+          isConnected: false,
+          balance: "0",
+          allowance: "0",
+        };
       }
-  
-      return true;
+
+      const provider = await this.ensureProvider();
+      const balance = await provider.getBalance(this.wallet.address);
+
+      // Check token allowance if token address is provided
+      let tokenAllowance = "0";
+      if (tokenAddress) {
+        try {
+          const tokenContract = new ethers.Contract(
+            tokenAddress,
+            ERC20_ABI,
+            provider
+          );
+          const allowance = await tokenContract.allowance(
+            this.wallet.address,
+            tokenAddress
+          );
+          tokenAllowance = ethers.formatEther(allowance);
+        } catch (tokenError) {
+          console.debug("Failed to check token allowance:", tokenError);
+        }
+      }
+
+      return {
+        isConnected: true,
+        balance: ethers.formatEther(balance),
+        allowance: tokenAllowance,
+      };
     } catch (error) {
-      console.error("Failed to initialize wallet from data:", error);
-      throw new Error("Failed to initialize agent wallet");
+      console.error("Failed to check wallet health:", error);
+      return {
+        isConnected: false,
+        balance: "0",
+        allowance: "0",
+      };
     }
   }
+
   getWalletAddress(): string | null {
     return this.wallet?.address || null;
   }

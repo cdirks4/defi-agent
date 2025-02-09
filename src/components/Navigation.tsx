@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import WalletConnect from "./WalletConnect";
-import { LineChart, Home, History } from "lucide-react";
+import {
+  LineChart,
+  Home,
+  History,
+  ArrowUpDown,
+  PlaySquare,
+} from "lucide-react";
 
 const Navigation = () => {
   const pathname = usePathname();
@@ -22,22 +28,52 @@ const Navigation = () => {
             DeFi Assistant
           </Link>
           <div className="flex space-x-6">
-            <Link href="/" className={`${isActive("/")} transition-colors`}>
+            <Link
+              href="/"
+              className={`${isActive(
+                "/"
+              )} transition-colors flex items-center gap-2`}
+            >
+              <Home size={16} />
               Home
             </Link>
             <Link
               href="/agent"
-              className={`${isActive("/agent")} transition-colors`}
+              className={`${isActive(
+                "/agent"
+              )} transition-colors flex items-center gap-2`}
             >
+              <History size={16} />
               Agent Management
             </Link>
+            <Link
+              href="/trading"
+              className={`${isActive(
+                "/trading"
+              )} transition-colors flex items-center gap-2`}
+            >
+              <LineChart size={16} />
+              Trading
+            </Link>
+            {/* <Link
+              href="/spread-trading"
+              className={`${isActive(
+                "/spread-trading"
+              )} transition-colors flex items-center gap-2`}
+            >
+              <ArrowUpDown size={16} />
+              Spread Trading
+            </Link> */}
+            <Link
+              href="/pools"
+              className={`${isActive(
+                "/simulations"
+              )} transition-colors flex items-center gap-2`}
+            >
+              <PlaySquare size={16} />
+              Simulations
+            </Link>
           </div>
-          <Link
-            href="/trading"
-            className={`${isActive("/trading")} transition-colors`}
-          >
-            Trading
-          </Link>
         </div>
         <WalletConnect onConnect={() => null} />
       </div>
