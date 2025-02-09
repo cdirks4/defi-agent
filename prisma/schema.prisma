@@ -1,12 +1,10 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [vector]
 }
 
 model UserInteraction {
@@ -14,7 +12,7 @@ model UserInteraction {
   userId      String
   message     String
   response    String
-  embedding   Unsupported("vector(1536)")
+  embedding   String   // Store vector as string temporarily
   metadata    Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -54,7 +52,7 @@ model SimulationHistory {
 
 model Embedding {
   id          Int      @id @default(autoincrement())
-  vector      Unsupported("vector(1536)")
+  vector      String   // Store vector as string temporarily
   content     String
   metadata    Json?
   createdAt   DateTime @default(now())
@@ -63,9 +61,9 @@ model Embedding {
 }
 
 model Item {
-  id                Int                     @id @default(autoincrement())
-  embedding         Unsupported("vector(3)")
-  binary_embedding  String?                 @db.Bit(3)
+  id                Int      @id @default(autoincrement())
+  embedding         String   // Store vector as string temporarily
+  binary_embedding  String?  @db.Bit(3)
 
   @@map("prisma_items")
 }

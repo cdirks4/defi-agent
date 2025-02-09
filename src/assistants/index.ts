@@ -81,7 +81,6 @@ const fetchTokenData = async (userId: string) => {
           derivedETH
           volumeUSD
           feesUSD
-          totalValueLockedUSD
         }
       }
     `;
@@ -92,7 +91,39 @@ const fetchTokenData = async (userId: string) => {
       result.data?.tokens?.length,
       "tokens"
     );
-    return result.data?.tokens || [];
+
+    // Process tokens with wallet health context
+    const processedTokens = await Promise.all(
+      (result.data?.tokens || []).map(async (token: TokenData) => {
+        try {
+          // Check token-specific wallet health if needed
+          const tokenHealth = await agentKit.checkWalletHealth(token.id);
+
+          return {
+            address: token.id,
+            symbol: token.symbol,
+            name: token.name,
+            decimals: token.decimals,
+            totalSupply: formatTokenValue(token.totalSupply),
+            volume: formatTokenValue(token.volume),
+            txCount: token.txCount,
+            poolCount: token.poolCount,
+            tvl: formatTokenValue(token.totalValueLocked),
+            tvlUSD: parseFloat(token.totalValueLockedUSD),
+            derivedETH: parseFloat(token.derivedETH),
+            volumeUSD: parseFloat(token.volumeUSD),
+            feesUSD: parseFloat(token.feesUSD),
+            walletBalance: tokenHealth.balance,
+            walletAllowance: tokenHealth.allowance,
+          };
+        } catch (error) {
+          console.error("Error processing token:", token.symbol, error);
+          return null;
+        }
+      })
+    );
+
+    return processedTokens.filter(Boolean);
   } catch (error) {
     console.error("❌ Failed to fetch token data:", error);
     return [];
